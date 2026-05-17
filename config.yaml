@@ -1,0 +1,259 @@
+lookback_days: 7
+
+max_results_per_source:
+  arxiv: 100
+  crossref: 100
+  pubmed: 100
+
+request_timeout_seconds: 25
+min_relevance_score: 1.0
+
+user_agent: "LiteratureWatcher/0.1 (mailto:your_email@example.com)"
+
+paths:
+  data_dir: "data"
+  reports_dir: "reports"
+  seen_items_file: "seen_items.json"
+  latest_results_file: "latest_results.json"
+
+scoring:
+  title_multiplier: 3.0
+  abstract_multiplier: 1.0
+
+keywords:
+  - term: "organic molecule"
+    weight: 3
+  - term: "organic molecules"
+    weight: 3
+  - term: "dye"
+    weight: 3
+  - term: "dye-sensitized"
+    weight: 4
+  - term: "chromophore"
+    weight: 3
+  - term: "photosensitizer"
+    weight: 3
+  - term: "molecular antenna"
+    weight: 4
+  - term: "organic antenna"
+    weight: 4
+  - term: "antenna sensitization"
+    weight: 4
+  - term: "gold nanoparticle"
+    weight: 5
+  - term: "gold nanoparticles"
+    weight: 5
+  - term: "Au nanoparticle"
+    weight: 5
+  - term: "Au nanoparticles"
+    weight: 5
+  - term: "Au nanorod"
+    weight: 5
+  - term: "Au nanorods"
+    weight: 5
+  - term: "gold nanorod"
+    weight: 5
+  - term: "gold nanorods"
+    weight: 5
+  - term: "gold nanostar"
+    weight: 5
+  - term: "gold nanostars"
+    weight: 5
+  - term: "gold nanoshell"
+    weight: 5
+  - term: "gold nanoshells"
+    weight: 5
+  - term: "gold shell"
+    weight: 4
+  - term: "gold film"
+    weight: 4
+  - term: "gold nanoarray"
+    weight: 5
+  - term: "gold nanoarrays"
+    weight: 5
+  - term: "gold nanostructure"
+    weight: 5
+  - term: "gold nanostructures"
+    weight: 5
+  - term: "plasmonic gold"
+    weight: 5
+  - term: "localized surface plasmon resonance"
+    weight: 5
+  - term: "LSPR"
+    weight: 5
+  - term: "plasmon-mediated energy transfer"
+    weight: 6
+  - term: "plasmon enhanced energy transfer"
+    weight: 5
+  - term: "plasmon-enhanced luminescence"
+    weight: 6
+  - term: "plasmonic enhancement"
+    weight: 4
+  - term: "molecule-to-metal energy transfer"
+    weight: 6
+  - term: "metal-to-lanthanide energy transfer"
+    weight: 6
+  - term: "metal enhanced fluorescence"
+    weight: 3
+  - term: "plasmon-exciton coupling"
+    weight: 5
+  - term: "lanthanide nanoparticle"
+    weight: 5
+  - term: "lanthanide nanoparticles"
+    weight: 5
+  - term: "rare-earth nanoparticle"
+    weight: 5
+  - term: "rare-earth nanoparticles"
+    weight: 5
+  - term: "rare-earth nanocrystal"
+    weight: 5
+  - term: "rare-earth nanocrystals"
+    weight: 5
+  - term: "lanthanide-doped nanoparticle"
+    weight: 6
+  - term: "lanthanide-doped nanoparticles"
+    weight: 6
+  - term: "upconversion nanoparticle"
+    weight: 6
+  - term: "upconversion nanoparticles"
+    weight: 6
+  - term: "UCNP"
+    weight: 5
+  - term: "NaErF4"
+    weight: 7
+  - term: "NaYF4:Er"
+    weight: 7
+  - term: "NaYF4:Yb,Er"
+    weight: 7
+  - term: "NaYF4"
+    weight: 4
+  - term: "Er3+"
+    weight: 5
+  - term: "Er 3+"
+    weight: 5
+  - term: "erbium"
+    weight: 4
+  - term: "Yb,Er"
+    weight: 5
+  - term: "Yb3+/Er3+"
+    weight: 5
+  - term: "lanthanide luminescence"
+    weight: 6
+  - term: "4f transition"
+    weight: 6
+  - term: "4f"
+    weight: 3
+  - term: "energy transfer"
+    weight: 2
+  - term: "sensitization"
+    weight: 2
+  - term: "upconversion"
+    weight: 3
+  - term: "surface plasmon"
+    weight: 4
+  - term: "plasmon"
+    weight: 2
+
+source_query_terms:
+  arxiv:
+    - "organic molecule"
+    - "dye"
+    - "chromophore"
+    - "photosensitizer"
+    - "molecular antenna"
+    - "organic antenna"
+    - "gold nanoparticle"
+    - "gold nanoparticles"
+    - "Au nanoparticle"
+    - "Au nanorod"
+    - "gold nanorod"
+    - "gold nanostar"
+    - "gold nanoshell"
+    - "gold nanoarray"
+    - "plasmonic gold"
+    - "localized surface plasmon resonance"
+    - "LSPR"
+    - "plasmon-mediated energy transfer"
+    - "plasmon-enhanced luminescence"
+    - "molecule-to-metal energy transfer"
+    - "metal-to-lanthanide energy transfer"
+    - "plasmon-exciton coupling"
+    - "lanthanide nanoparticle"
+    - "rare-earth nanoparticle"
+    - "upconversion nanoparticle"
+    - "NaErF4"
+    - "NaYF4:Er"
+    - "NaYF4:Yb,Er"
+    - "Er3+"
+    - "lanthanide luminescence"
+    - "4f transition"
+    - "energy transfer"
+    - "sensitization"
+  crossref:
+    - "organic molecule"
+    - "dye"
+    - "chromophore"
+    - "photosensitizer"
+    - "molecular antenna"
+    - "organic antenna"
+    - "gold nanoparticle"
+    - "gold nanoparticles"
+    - "Au nanoparticle"
+    - "Au nanorod"
+    - "gold nanorod"
+    - "gold nanostar"
+    - "gold nanoshell"
+    - "gold nanoarray"
+    - "plasmonic gold"
+    - "localized surface plasmon resonance"
+    - "LSPR"
+    - "plasmon-mediated energy transfer"
+    - "plasmon-enhanced luminescence"
+    - "molecule-to-metal energy transfer"
+    - "metal-to-lanthanide energy transfer"
+    - "plasmon-exciton coupling"
+    - "lanthanide nanoparticle"
+    - "rare-earth nanoparticle"
+    - "upconversion nanoparticle"
+    - "NaErF4"
+    - "NaYF4:Er"
+    - "NaYF4:Yb,Er"
+    - "Er3+"
+    - "lanthanide luminescence"
+    - "4f transition"
+    - "energy transfer"
+    - "sensitization"
+  pubmed:
+    - "organic molecule"
+    - "dye"
+    - "chromophore"
+    - "photosensitizer"
+    - "molecular antenna"
+    - "organic antenna"
+    - "gold nanoparticle"
+    - "gold nanoparticles"
+    - "Au nanoparticle"
+    - "Au nanorod"
+    - "gold nanorod"
+    - "gold nanostar"
+    - "gold nanoshell"
+    - "gold nanoarray"
+    - "plasmonic gold"
+    - "localized surface plasmon resonance"
+    - "LSPR"
+    - "plasmon-mediated energy transfer"
+    - "plasmon-enhanced luminescence"
+    - "molecule-to-metal energy transfer"
+    - "metal-to-lanthanide energy transfer"
+    - "plasmon-exciton coupling"
+    - "lanthanide nanoparticle"
+    - "rare-earth nanoparticle"
+    - "upconversion nanoparticle"
+    - "NaErF4"
+    - "NaYF4:Er"
+    - "NaYF4:Yb,Er"
+    - "Er3+"
+    - "lanthanide luminescence"
+    - "4f transition"
+    - "energy transfer"
+    - "sensitization"
