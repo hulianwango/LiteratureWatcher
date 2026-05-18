@@ -24,5 +24,5 @@ if errorlevel 1 (
   exit /b %errorlevel%
 )
 
-echo Word, Markdown, and CSV reports saved in the reports folder.
+echo Cumulative Word, Markdown, and CSV reports updated in the reports folder.
 endlocal

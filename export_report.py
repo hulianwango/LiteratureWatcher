@@ -3,7 +3,8 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-from datetime import date
+import re
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -18,6 +19,7 @@ ITEM_FIELDS = [
     "title_zh",
     "authors",
     "year",
+    "publication_date",
     "journal_or_source",
     "doi",
     "url",
@@ -29,17 +31,18 @@ ITEM_FIELDS = [
     "reason",
 ]
 
-CSV_FIELDS = ["date", *ITEM_FIELDS]
+CSV_FIELDS = ["date", "first_seen_date", "last_seen_date", *ITEM_FIELDS]
 
 TABLE_COLUMNS = [
     "序号",
+    "发表日期",
     "英文题目",
     "中文题目",
-    "年份",
     "期刊 / 来源",
     "DOI",
     "链接",
     "关键词命中",
+    "相关性",
     "是否以前出现过",
 ]
 
@@ -104,6 +107,16 @@ def ensure_reports_dir(config: dict[str, Any]) -> Path:
     return reports_dir
 
 
+def cumulative_results_path(config: dict[str, Any]) -> Path:
+    paths = config.get("paths", {})
+    data_dir = Path(paths.get("data_dir", "data"))
+    return data_dir / paths.get("cumulative_results_file", "cumulative_results.json")
+
+
+def report_file_path(config: dict[str, Any], reports_dir: Path, key: str, default_name: str) -> Path:
+    return reports_dir / config.get("paths", {}).get(key, default_name)
+
+
 def text_value(value: Any) -> str:
     if isinstance(value, list):
         return "; ".join(str(item) for item in value)
@@ -125,12 +138,132 @@ def seen_text(item: dict[str, Any]) -> str:
     return "是" if bool_value(item.get("previously_seen", False)) else "否"
 
 
+def parse_date_value(value: Any) -> date | None:
+    text = text_value(value).strip()
+    if not text:
+        return None
+
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+    except ValueError:
+        pass
+
+    if re.fullmatch(r"\d{4}", text):
+        return date(int(text), 1, 1)
+    return None
+
+
+def item_sort_date(item: dict[str, Any]) -> date:
+    publication_date = parse_date_value(item.get("publication_date"))
+    if publication_date is not None:
+        return publication_date
+
+    year_date = parse_date_value(item.get("year"))
+    if year_date is not None:
+        return year_date
+
+    retrieved_date = parse_date_value(item.get("last_seen_date") or item.get("retrieved_date"))
+    return retrieved_date or date.min
+
+
+def item_relevance_score(item: dict[str, Any]) -> float:
+    try:
+        return float(item.get("relevance_score", 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def publication_label(item: dict[str, Any]) -> str:
+    return text_value(item.get("publication_date", "")).strip() or text_value(item.get("year", "")).strip()
+
+
+def normalize_doi_key(value: Any) -> str:
+    doi = text_value(value).strip().lower()
+    doi = re.sub(r"^https?://(dx\.)?doi\.org/", "", doi)
+    doi = doi.removeprefix("doi:")
+    return doi.strip()
+
+
+def normalize_title_key(value: Any) -> str:
+    title = re.sub(r"\s+", " ", text_value(value)).strip().lower()
+    return re.sub(r"[^a-z0-9]+", "", title)
+
+
+def history_key(item: dict[str, Any]) -> str:
+    doi = normalize_doi_key(item.get("doi"))
+    if doi:
+        return f"doi:{doi}"
+
+    title = normalize_title_key(item.get("title_en") or item.get("title_zh"))
+    return f"title:{title}" if title else ""
+
+
+def sort_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        items,
+        key=lambda item: (
+            item_sort_date(item),
+            item_relevance_score(item),
+            parse_date_value(item.get("last_seen_date") or item.get("retrieved_date")) or date.min,
+        ),
+        reverse=True,
+    )
+
+
 def normalize_item(item: dict[str, Any]) -> dict[str, Any]:
     normalized = {field: text_value(item.get(field, "")) for field in ITEM_FIELDS}
     normalized["title_en"] = normalized["title_en"] or text_value(item.get("title", ""))
     normalized["abstract_en"] = normalized["abstract_en"] or text_value(item.get("abstract", ""))
     normalized["previously_seen"] = item.get("previously_seen", False)
+    normalized["retrieved_date"] = text_value(item.get("retrieved_date", "") or item.get("date", ""))
+    normalized["first_seen_date"] = text_value(item.get("first_seen_date", ""))
+    normalized["last_seen_date"] = text_value(item.get("last_seen_date", "") or normalized["retrieved_date"])
     return normalized
+
+
+def load_cumulative_results(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"items": []}
+    return load_results(path)
+
+
+def merge_cumulative_results(
+    existing_payload: dict[str, Any],
+    current_payload: dict[str, Any],
+    current_items: list[dict[str, Any]],
+    report_date: str,
+) -> dict[str, Any]:
+    merged: dict[str, dict[str, Any]] = {}
+
+    for index, item in enumerate(existing_payload.get("items", [])):
+        normalized = normalize_item(item)
+        key = history_key(normalized) or f"existing:{index}"
+        merged[key] = normalized
+
+    for index, item in enumerate(current_items):
+        current = normalize_item(item)
+        current["retrieved_date"] = report_date
+        current["last_seen_date"] = report_date
+        key = history_key(current) or f"current:{report_date}:{index}"
+        previous = merged.get(key)
+
+        if previous is not None:
+            current["first_seen_date"] = previous.get("first_seen_date") or previous.get("retrieved_date") or report_date
+            current["previously_seen"] = True
+        else:
+            current["first_seen_date"] = report_date
+
+        merged[key] = current
+
+    items = sort_items(list(merged.values()))
+    return {
+        "generated_at": current_payload.get("generated_at", ""),
+        "latest_report_date": report_date,
+        "lookback_days": current_payload.get("lookback_days", ""),
+        "cutoff_date": current_payload.get("cutoff_date", ""),
+        "sources": current_payload.get("sources", {}),
+        "items": items,
+    }
 
 
 def unique_dois(items: list[dict[str, Any]]) -> list[str]:
@@ -254,14 +387,18 @@ def write_csv(path: Path, report_date: str, items: list[dict[str, Any]]) -> None
         writer = csv.DictWriter(file, fieldnames=CSV_FIELDS)
         writer.writeheader()
         for item in items:
-            row = {"date": report_date}
+            row = {
+                "date": text_value(item.get("retrieved_date", "")) or text_value(item.get("last_seen_date", "")) or report_date,
+                "first_seen_date": text_value(item.get("first_seen_date", "")),
+                "last_seen_date": text_value(item.get("last_seen_date", "")),
+            }
             for field in ITEM_FIELDS:
                 row[field] = seen_text(item) if field == "previously_seen" else text_value(item.get(field, ""))
             writer.writerow(row)
 
 
 def write_markdown(path: Path, payload: dict[str, Any], items: list[dict[str, Any]]) -> None:
-    report_date = payload.get("report_date", date.today().isoformat())
+    report_date = payload.get("latest_report_date") or payload.get("report_date", date.today().isoformat())
     generated_at = payload.get("generated_at", "")
     lookback_days = payload.get("lookback_days", "")
     cutoff_date = payload.get("cutoff_date", "")
@@ -269,14 +406,14 @@ def write_markdown(path: Path, payload: dict[str, Any], items: list[dict[str, An
     dois = unique_dois(items)
 
     lines = [
-        f"# 每日文献检索报告 - {report_date}",
+        f"# 累计文献检索报告 - 更新至 {report_date}",
         "",
-        f"生成时间：{generated_at}",
-        f"检索窗口：最近 {lookback_days} 天，起始日期 {cutoff_date}",
-        f"候选文献数：{len(items)}",
-        f"来源抓取数：{format_source_counts(sources)}",
+        f"最近更新时间：{generated_at}",
+        f"本次检索窗口：最近 {lookback_days} 天，起始日期 {cutoff_date}",
+        f"累计候选文献数：{len(items)}",
+        f"本次来源抓取数：{format_source_counts(sources)}",
         "",
-        "## 一、今日 DOI 清单",
+        "## 一、累计 DOI 清单",
         "",
     ]
 
@@ -299,13 +436,14 @@ def write_markdown(path: Path, payload: dict[str, Any], items: list[dict[str, An
         for index, item in enumerate(items, start=1):
             row = [
                 str(index),
+                markdown_cell(publication_label(item)),
                 markdown_cell(item.get("title_en", "")),
                 markdown_cell(item.get("title_zh", "")),
-                markdown_cell(item.get("year", "")),
                 markdown_cell(item.get("journal_or_source", "")),
                 markdown_cell(item.get("doi", "")),
                 markdown_cell(item.get("url", "")),
                 markdown_cell(item.get("matched_keywords", "")),
+                markdown_cell(item.get("relevance_score", "")),
                 seen_text(item),
             ]
             lines.append("| " + " | ".join(row) + " |")
@@ -325,9 +463,12 @@ def write_markdown(path: Path, payload: dict[str, Any], items: list[dict[str, An
                 f"中文题目：{text_value(item.get('title_zh', ''))}",
                 f"DOI：{text_value(item.get('doi', ''))}",
                 f"链接：{text_value(item.get('url', ''))}",
-                f"年份：{text_value(item.get('year', ''))}",
+                f"发表日期：{publication_label(item)}",
                 f"期刊 / 来源：{text_value(item.get('journal_or_source', ''))}",
                 f"作者：{text_value(item.get('authors', ''))}",
+                f"最近检索日期：{text_value(item.get('last_seen_date', ''))}",
+                f"首次进入报告：{text_value(item.get('first_seen_date', ''))}",
+                f"相关性分数：{text_value(item.get('relevance_score', ''))}",
                 f"关键词命中：{text_value(item.get('matched_keywords', ''))}",
                 f"是否以前出现过：{seen_text(item)}",
                 "",
@@ -666,7 +807,7 @@ def _set_running_header_footer(section: Any, report_date: str) -> None:
     _clear_paragraph(header_paragraph)
     header_paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     header_paragraph.paragraph_format.space_after = Pt(0)
-    header_run = header_paragraph.add_run(f"每日文献检索报告 · {report_date}")
+    header_run = header_paragraph.add_run(f"累计文献检索报告 · 更新至 {report_date}")
     _set_run_font(header_run, size=9, color="6B7280", bold=True)
 
     footer = section.footer
@@ -684,7 +825,7 @@ def _set_running_header_footer(section: Any, report_date: str) -> None:
 
 def _add_title_block(document: Any, report_date: str) -> None:
     paragraph = document.add_paragraph(style="Title")
-    run = paragraph.add_run(f"每日文献检索报告 - {report_date}")
+    run = paragraph.add_run(f"累计文献检索报告 - 更新至 {report_date}")
     _set_run_font(run, size=24, color="0B2545", bold=True)
     _set_paragraph_bottom_border(paragraph, color="B9CBE0", size="14", space="12")
 
@@ -717,7 +858,7 @@ def _add_summary_table(document: Any, items: list[dict[str, Any]]) -> None:
 
     table = document.add_table(rows=1, cols=len(TABLE_COLUMNS))
     table.style = "Table Grid"
-    column_widths = [500, 2900, 2300, 650, 1350, 1500, 1800, 1040, 800]
+    column_widths = [450, 850, 2450, 2000, 1250, 1400, 1650, 900, 650, 700]
     _set_table_geometry(table, column_widths)
     _repeat_table_header(table.rows[0])
 
@@ -732,20 +873,21 @@ def _add_summary_table(document: Any, items: list[dict[str, Any]]) -> None:
         fill = "F8FAFC" if row_index % 2 == 0 else "FFFFFF"
         values = [
             str(row_index),
+            publication_label(item),
             text_value(item.get("title_en", "")),
             text_value(item.get("title_zh", "")),
-            text_value(item.get("year", "")),
             text_value(item.get("journal_or_source", "")),
             text_value(item.get("doi", "")),
             text_value(item.get("url", "")),
             text_value(item.get("matched_keywords", "")),
+            text_value(item.get("relevance_score", "")),
             seen_text(item),
         ]
         for column_index, value in enumerate(values):
             cell = row.cells[column_index]
             cell.text = value
             _set_cell_shading(cell, fill)
-            align = WD_ALIGN_PARAGRAPH.CENTER if column_index in {0, 3, 8} else WD_ALIGN_PARAGRAPH.LEFT
+            align = WD_ALIGN_PARAGRAPH.CENTER if column_index in {0, 1, 8, 9} else WD_ALIGN_PARAGRAPH.LEFT
             _style_cell_text(cell, size=7.5, color="1F2937", align=align, line_spacing=1.05)
     _set_table_geometry(table, column_widths)
 
@@ -818,7 +960,7 @@ def write_word(path: Path, report_date: str, items: list[dict[str, Any]]) -> Non
     _set_running_header_footer(document.sections[0], report_date)
     _add_title_block(document, report_date)
 
-    _add_section_heading(document, "一、今日 DOI 清单")
+    _add_section_heading(document, "一、累计 DOI 清单")
     dois = unique_dois(items)
     _add_doi_list(document, dois)
 
@@ -851,9 +993,12 @@ def write_word(path: Path, report_date: str, items: list[dict[str, Any]]) -> Non
                 ("中文题目", item.get("title_zh", "")),
                 ("DOI", item.get("doi", "")),
                 ("链接", item.get("url", "")),
-                ("年份", item.get("year", "")),
+                ("发表日期", publication_label(item)),
                 ("期刊 / 来源", item.get("journal_or_source", "")),
                 ("作者", item.get("authors", "")),
+                ("最近检索日期", item.get("last_seen_date", "")),
+                ("首次进入报告", item.get("first_seen_date", "")),
+                ("相关性分数", item.get("relevance_score", "")),
                 ("关键词命中", item.get("matched_keywords", "")),
                 ("是否以前出现过", seen_text(item)),
             ],
@@ -896,20 +1041,27 @@ def main() -> None:
     translation_cache_path = Path(paths.get("data_dir", "data")) / "translation_cache.json"
     translation_config = None if args.no_translate else load_tencent_translation_config(cache_path=translation_cache_path)
     items = maybe_translate_items(items, translation_config)
+    items = sort_items(items)
     save_translated_results(input_path, config, payload, items)
 
     reports_dir = ensure_reports_dir(config)
-    word_path = reports_dir / f"{report_date}_daily_literature.docx"
-    markdown_path = reports_dir / f"{report_date}_daily_literature.md"
-    csv_path = reports_dir / f"{report_date}_daily_literature.csv"
+    history_path = cumulative_results_path(config)
+    cumulative_payload = merge_cumulative_results(load_cumulative_results(history_path), payload, items, report_date)
+    save_results(history_path, cumulative_payload)
 
-    write_word(word_path, report_date, items)
-    write_markdown(markdown_path, payload, items)
-    write_csv(csv_path, report_date, items)
+    cumulative_items = cumulative_payload["items"]
+    word_path = report_file_path(config, reports_dir, "word_report_file", "literature_report.docx")
+    markdown_path = report_file_path(config, reports_dir, "markdown_report_file", "literature_report.md")
+    csv_path = report_file_path(config, reports_dir, "csv_report_file", "literature_report.csv")
+
+    write_word(word_path, report_date, cumulative_items)
+    write_markdown(markdown_path, cumulative_payload, cumulative_items)
+    write_csv(csv_path, report_date, cumulative_items)
 
     print(f"Saved Word report to {word_path}")
     print(f"Saved Markdown report to {markdown_path}")
     print(f"Saved CSV report to {csv_path}")
+    print(f"Updated cumulative results at {history_path}")
 
 
 if __name__ == "__main__":

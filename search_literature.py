@@ -23,6 +23,7 @@ OUTPUT_FIELDS = [
     "title_zh",
     "authors",
     "year",
+    "publication_date",
     "journal_or_source",
     "doi",
     "url",
@@ -209,6 +210,23 @@ def parse_year_from_date_parts(parts: Any) -> str:
         return ""
 
 
+def parse_date_from_date_parts(parts: Any) -> date | None:
+    try:
+        values = parts["date-parts"][0]
+        year = int(values[0])
+        month = int(values[1]) if len(values) > 1 and values[1] else 1
+        day = int(values[2]) if len(values) > 2 and values[2] else 1
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
+
+    month = min(max(month, 1), 12)
+    day = min(max(day, 1), 31)
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return date(year, month, 1)
+
+
 def parse_iso_date(value: str | None) -> date | None:
     if not value:
         return None
@@ -232,6 +250,68 @@ def doi_url(doi: str) -> str:
 
 def compact_people(names: list[str], limit: int = 20) -> str:
     return "; ".join(name for name in names[:limit] if name)
+
+
+def parse_pubmed_month(value: str) -> int:
+    clean = value.strip()
+    if clean.isdigit():
+        return min(max(int(clean), 1), 12)
+
+    month_names = {
+        "jan": 1,
+        "feb": 2,
+        "mar": 3,
+        "apr": 4,
+        "may": 5,
+        "jun": 6,
+        "jul": 7,
+        "aug": 8,
+        "sep": 9,
+        "oct": 10,
+        "nov": 11,
+        "dec": 12,
+    }
+    return month_names.get(clean[:3].lower(), 1)
+
+
+def parse_pubmed_publication_date(article_node: ET.Element) -> date | None:
+    pub_date = article_node.find("./Journal/JournalIssue/PubDate")
+    if pub_date is None:
+        return None
+
+    year_text = pub_date.findtext("Year", default="").strip()
+    if not year_text:
+        medline_date = pub_date.findtext("MedlineDate", default="")
+        match = re.search(r"\d{4}", medline_date)
+        year_text = match.group(0) if match else ""
+    if not year_text:
+        return None
+
+    month = parse_pubmed_month(pub_date.findtext("Month", default=""))
+    day_text = pub_date.findtext("Day", default="").strip()
+    day = int(day_text) if day_text.isdigit() else 1
+    try:
+        return date(int(year_text), month, day)
+    except ValueError:
+        return date(int(year_text), month, 1)
+
+
+def item_publication_date(item: dict[str, Any]) -> date:
+    parsed = parse_iso_date(str(item.get("publication_date", "")))
+    if parsed is not None:
+        return parsed
+
+    year = str(item.get("year", "")).strip()
+    if year.isdigit():
+        return date(int(year), 1, 1)
+    return date.min
+
+
+def item_relevance_score(item: dict[str, Any]) -> float:
+    try:
+        return float(item.get("relevance_score", 0))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def build_keyword_map(config: dict[str, Any]) -> list[tuple[str, float]]:
@@ -441,6 +521,7 @@ def fetch_openalex(config: dict[str, Any], cutoff: date, end_date: date) -> list
                 "title_zh": "",
                 "authors": compact_people(authors),
                 "year": str(work.get("publication_year") or ""),
+                "publication_date": clean_text(work.get("publication_date")),
                 "journal_or_source": clean_text(source_info.get("display_name")) or "OpenAlex",
                 "doi": doi,
                 "url": url,
@@ -501,6 +582,7 @@ def fetch_semantic_scholar(config: dict[str, Any], cutoff: date, end_date: date)
                 "title_zh": "",
                 "authors": compact_people(authors),
                 "year": str(paper.get("year") or parse_year_text(paper.get("publicationDate"))),
+                "publication_date": clean_text(paper.get("publicationDate")),
                 "journal_or_source": clean_text(publication_venue.get("name")) or clean_text(paper.get("venue")) or "Semantic Scholar",
                 "doi": doi,
                 "url": paper.get("url") or doi_url(doi),
@@ -552,6 +634,7 @@ def fetch_europe_pmc(config: dict[str, Any], cutoff: date, end_date: date) -> li
                 "title_zh": "",
                 "authors": clean_text(record.get("authorString")),
                 "year": clean_text(record.get("pubYear")) or parse_year_text(record.get("firstPublicationDate")),
+                "publication_date": clean_text(record.get("firstPublicationDate")),
                 "journal_or_source": clean_text(record.get("journalTitle")) or "Europe PMC",
                 "doi": doi,
                 "url": url,
@@ -611,6 +694,7 @@ def fetch_doaj(config: dict[str, Any], cutoff: date, end_date: date) -> list[dic
                 "title_zh": "",
                 "authors": compact_people(author_names),
                 "year": clean_text(bibjson.get("year")),
+                "publication_date": clean_text(bibjson.get("year")),
                 "journal_or_source": clean_text(journal.get("title")) or "DOAJ",
                 "doi": doi,
                 "url": landing_url or doi_url(doi),
@@ -665,6 +749,7 @@ def fetch_biorxiv_like(config: dict[str, Any], cutoff: date, end_date: date, ser
                     "title_zh": "",
                     "authors": clean_text(record.get("authors")),
                     "year": parse_year_text(record.get("date")),
+                    "publication_date": clean_text(record.get("date")),
                     "journal_or_source": "bioRxiv" if server == "biorxiv" else "medRxiv",
                     "doi": doi,
                     "url": f"https://{host}/content/{doi}{version_suffix}" if doi else "",
@@ -738,6 +823,7 @@ def fetch_arxiv(config: dict[str, Any], cutoff: date) -> list[dict[str, Any]]:
                 "title_zh": "",
                 "authors": "; ".join(authors),
                 "year": str(record_date.year) if record_date else "",
+                "publication_date": record_date.isoformat() if record_date else "",
                 "journal_or_source": source,
                 "doi": doi,
                 "url": entry.get("link", ""),
@@ -761,7 +847,8 @@ def crossref_work_to_item(work: dict[str, Any], source: str, source_label: str =
         or work.get("issued")
         or {}
     )
-    year = parse_year_from_date_parts(published)
+    publication_date = parse_date_from_date_parts(published)
+    year = str(publication_date.year) if publication_date else parse_year_from_date_parts(published)
     authors = []
     for author in work.get("author", []):
         parts = [author.get("given", ""), author.get("family", "")]
@@ -781,6 +868,7 @@ def crossref_work_to_item(work: dict[str, Any], source: str, source_label: str =
         "title_zh": "",
         "authors": compact_people(authors),
         "year": year,
+        "publication_date": publication_date.isoformat() if publication_date else "",
         "journal_or_source": journal_or_source,
         "doi": doi,
         "url": work.get("URL", "") or doi_url(doi),
@@ -977,6 +1065,9 @@ def fetch_pubmed(config: dict[str, Any], cutoff: date, end_date: date) -> list[d
             article_node.findtext("./Journal/JournalIssue/PubDate/Year")
             or article_node.findtext("./Journal/JournalIssue/PubDate/MedlineDate", default="")[:4]
         )
+        publication_date = parse_pubmed_publication_date(article_node)
+        if publication_date is not None:
+            year = str(publication_date.year)
 
         authors = []
         for author in article_node.findall(".//Author"):
@@ -1002,6 +1093,7 @@ def fetch_pubmed(config: dict[str, Any], cutoff: date, end_date: date) -> list[d
                 "title_zh": "",
                 "authors": "; ".join(authors),
                 "year": year,
+                "publication_date": publication_date.isoformat() if publication_date else "",
                 "journal_or_source": clean_text(journal_title),
                 "doi": doi,
                 "url": url,
@@ -1053,7 +1145,7 @@ def dedupe_and_filter(
 
         results.append({field: item.get(field, "") for field in OUTPUT_FIELDS})
 
-    results.sort(key=lambda value: float(value.get("relevance_score", 0)), reverse=True)
+    results.sort(key=lambda value: (item_publication_date(value), item_relevance_score(value)), reverse=True)
     return results
 
 

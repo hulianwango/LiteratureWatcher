@@ -48,6 +48,10 @@ paths:
   reports_dir: "reports"
   seen_items_file: "seen_items.json"
   latest_results_file: "latest_results.json"
+  cumulative_results_file: "cumulative_results.json"
+  word_report_file: "literature_report.docx"
+  markdown_report_file: "literature_report.md"
+  csv_report_file: "literature_report.csv"
 
 scoring:
   title_multiplier: 3.0

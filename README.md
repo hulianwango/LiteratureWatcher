@@ -1,6 +1,6 @@
 # LiteratureWatcher
 
-LiteratureWatcher performs daily automated literature searches from major metadata databases, biomedical/preprint indexes, open-access indexes, and publisher-specific Crossref searches, then exports a Word-first daily report for DOI copying and manual screening.
+LiteratureWatcher performs daily automated literature searches from major metadata databases, biomedical/preprint indexes, open-access indexes, and publisher-specific Crossref searches, then updates one cumulative Word-first report for DOI copying and manual screening.
 
 Google Scholar is not used.
 
@@ -27,7 +27,7 @@ Representative mechanisms include:
 - `requirements.txt`: Python packages required by the project.
 - `run_daily.bat`: Windows one-click script that runs search first, then exports reports.
 - `data/`: Stores `seen_items.json`, dated JSON result files, `latest_results.json`, and `translation_cache.json`.
-- `reports/`: Stores daily `.docx`, `.md`, and `.csv` reports.
+- `reports/`: Stores the cumulative `.docx`, `.md`, and `.csv` reports.
 
 ## Install
 
@@ -54,19 +54,20 @@ The default search window is the most recent 7 days.
 
 ## Outputs
 
-Each daily run writes:
+Each daily run updates a single cumulative report instead of creating a new Word file every day:
 
 - `data/YYYY-MM-DD_results.json`
 - `data/latest_results.json`
-- `reports/YYYY-MM-DD_daily_literature.docx`
-- `reports/YYYY-MM-DD_daily_literature.md`
-- `reports/YYYY-MM-DD_daily_literature.csv`
+- `data/cumulative_results.json`
+- `reports/literature_report.docx`
+- `reports/literature_report.md`
+- `reports/literature_report.csv`
 - updated `data/seen_items.json`
 
-The Word report has three main sections:
+The Word report is sorted by publication time in descending order. Items in the same date bucket are sorted by relevance score in descending order. It has three main sections:
 
-- 今日 DOI 清单: one DOI per line, or `No DOI available`
-- 候选文献总表: title, year, source, DOI, link, matched keywords, and whether the paper appeared before
+- 累计 DOI 清单: one DOI per line, or `No DOI available`
+- 候选文献总表: publication date, title, source, DOI, link, matched keywords, relevance score, and whether the paper appeared before
 - 详细文献信息: English and Chinese metadata, abstracts, and simple keyword-based relevance reasons
 
 ## Optional Commands
@@ -127,4 +128,4 @@ Translations are cached in `data/translation_cache.json`, so repeated titles and
 
 The current run is deduplicated first by DOI. If no DOI is available, normalized title is used.
 
-`data/seen_items.json` no longer suppresses candidates from the daily report. It only marks whether each candidate was previously seen through the `previously_seen` field, so a daily report should reflect the actual candidates found that day.
+`data/seen_items.json` no longer suppresses candidates from the report. It only marks whether each candidate was previously seen through the `previously_seen` field, so each run still reflects the actual candidates found that day before they are merged into the cumulative report.
