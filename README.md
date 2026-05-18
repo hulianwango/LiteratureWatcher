@@ -26,6 +26,7 @@ Representative mechanisms include:
 - `tencent_translation.py`: Reads optional Tencent Cloud translation settings from `.env`, translates titles and abstracts into Simplified Chinese, and caches translations.
 - `requirements.txt`: Python packages required by the project.
 - `run_daily.bat`: Windows one-click script that runs search first, then exports reports.
+- `run_daily_auto.bat`: Non-interactive Windows script for scheduled runs; it writes progress to `logs/daily_literature.log`.
 - `data/`: Stores `seen_items.json`, dated JSON result files, `latest_results.json`, and `translation_cache.json`.
 - `reports/`: Stores the cumulative `.docx` report.
 
