@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import re
 from datetime import date, datetime
@@ -31,11 +30,10 @@ ITEM_FIELDS = [
     "reason",
 ]
 
-CSV_FIELDS = ["date", "first_seen_date", "last_seen_date", *ITEM_FIELDS]
-
 TABLE_COLUMNS = [
     "序号",
-    "发表日期",
+    "首次检索日期",
+    "论文发表日期",
     "英文题目",
     "中文题目",
     "期刊 / 来源",
@@ -154,16 +152,11 @@ def parse_date_value(value: Any) -> date | None:
 
 
 def item_sort_date(item: dict[str, Any]) -> date:
-    publication_date = parse_date_value(item.get("publication_date"))
-    if publication_date is not None:
-        return publication_date
-
-    year_date = parse_date_value(item.get("year"))
-    if year_date is not None:
-        return year_date
-
-    retrieved_date = parse_date_value(item.get("last_seen_date") or item.get("retrieved_date"))
-    return retrieved_date or date.min
+    for field in ("first_seen_date", "retrieved_date", "last_seen_date"):
+        parsed = parse_date_value(item.get(field))
+        if parsed is not None:
+            return parsed
+    return date.min
 
 
 def item_relevance_score(item: dict[str, Any]) -> float:
@@ -175,6 +168,18 @@ def item_relevance_score(item: dict[str, Any]) -> float:
 
 def publication_label(item: dict[str, Any]) -> str:
     return text_value(item.get("publication_date", "")).strip() or text_value(item.get("year", "")).strip()
+
+
+def retrieval_label(item: dict[str, Any]) -> str:
+    for field in ("first_seen_date", "retrieved_date", "last_seen_date"):
+        value = text_value(item.get(field, "")).strip()
+        if value:
+            return value
+    return ""
+
+
+def item_publication_sort_date(item: dict[str, Any]) -> date:
+    return parse_date_value(item.get("publication_date")) or parse_date_value(item.get("year")) or date.min
 
 
 def normalize_doi_key(value: Any) -> str:
@@ -204,7 +209,7 @@ def sort_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         key=lambda item: (
             item_sort_date(item),
             item_relevance_score(item),
-            parse_date_value(item.get("last_seen_date") or item.get("retrieved_date")) or date.min,
+            item_publication_sort_date(item),
         ),
         reverse=True,
     )
@@ -266,17 +271,17 @@ def merge_cumulative_results(
     }
 
 
-def unique_dois(items: list[dict[str, Any]]) -> list[str]:
+def unique_doi_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: set[str] = set()
-    dois: list[str] = []
+    doi_items: list[dict[str, Any]] = []
     for item in items:
         doi = text_value(item.get("doi", "")).strip()
         key = doi.lower()
         if not doi or key in seen:
             continue
         seen.add(key)
-        dois.append(doi)
-    return dois
+        doi_items.append(item)
+    return doi_items
 
 
 def format_source_counts(sources: dict[str, Any]) -> str:
@@ -284,10 +289,6 @@ def format_source_counts(sources: dict[str, Any]) -> str:
     for source, count in sorted(sources.items()):
         parts.append(f"{source}={count}")
     return ", ".join(parts) if parts else "No source counts available"
-
-
-def markdown_cell(value: Any) -> str:
-    return text_value(value).replace("\n", " ").replace("|", "\\|").strip()
 
 
 def item_text_blob(item: dict[str, Any]) -> str:
@@ -380,113 +381,6 @@ def relevance_reasons(item: dict[str, Any]) -> list[str]:
             reasons.append(existing_reason or "根据题目或摘要命中的宽关键词列为候选")
 
     return reasons[:6]
-
-
-def write_csv(path: Path, report_date: str, items: list[dict[str, Any]]) -> None:
-    with path.open("w", encoding="utf-8-sig", newline="") as file:
-        writer = csv.DictWriter(file, fieldnames=CSV_FIELDS)
-        writer.writeheader()
-        for item in items:
-            row = {
-                "date": text_value(item.get("retrieved_date", "")) or text_value(item.get("last_seen_date", "")) or report_date,
-                "first_seen_date": text_value(item.get("first_seen_date", "")),
-                "last_seen_date": text_value(item.get("last_seen_date", "")),
-            }
-            for field in ITEM_FIELDS:
-                row[field] = seen_text(item) if field == "previously_seen" else text_value(item.get(field, ""))
-            writer.writerow(row)
-
-
-def write_markdown(path: Path, payload: dict[str, Any], items: list[dict[str, Any]]) -> None:
-    report_date = payload.get("latest_report_date") or payload.get("report_date", date.today().isoformat())
-    generated_at = payload.get("generated_at", "")
-    lookback_days = payload.get("lookback_days", "")
-    cutoff_date = payload.get("cutoff_date", "")
-    sources = payload.get("sources", {})
-    dois = unique_dois(items)
-
-    lines = [
-        f"# 累计文献检索报告 - 更新至 {report_date}",
-        "",
-        f"最近更新时间：{generated_at}",
-        f"本次检索窗口：最近 {lookback_days} 天，起始日期 {cutoff_date}",
-        f"累计候选文献数：{len(items)}",
-        f"本次来源抓取数：{format_source_counts(sources)}",
-        "",
-        "## 一、累计 DOI 清单",
-        "",
-    ]
-
-    if dois:
-        lines.extend(dois)
-    else:
-        lines.append("No DOI available")
-
-    lines.extend(
-        [
-            "",
-            "## 二、候选文献总表",
-            "",
-        ]
-    )
-
-    if items:
-        lines.append("| " + " | ".join(TABLE_COLUMNS) + " |")
-        lines.append("| " + " | ".join("---" for _ in TABLE_COLUMNS) + " |")
-        for index, item in enumerate(items, start=1):
-            row = [
-                str(index),
-                markdown_cell(publication_label(item)),
-                markdown_cell(item.get("title_en", "")),
-                markdown_cell(item.get("title_zh", "")),
-                markdown_cell(item.get("journal_or_source", "")),
-                markdown_cell(item.get("doi", "")),
-                markdown_cell(item.get("url", "")),
-                markdown_cell(item.get("matched_keywords", "")),
-                markdown_cell(item.get("relevance_score", "")),
-                seen_text(item),
-            ]
-            lines.append("| " + " | ".join(row) + " |")
-    else:
-        lines.append("No candidate literature was found.")
-
-    lines.extend(["", "## 三、详细文献信息", ""])
-
-    if not items:
-        lines.append("No candidate literature was found.")
-    for index, item in enumerate(items, start=1):
-        title_en = text_value(item.get("title_en", "")).strip() or "(No English title)"
-        lines.extend(
-            [
-                f"### {index}. {title_en}",
-                "",
-                f"中文题目：{text_value(item.get('title_zh', ''))}",
-                f"DOI：{text_value(item.get('doi', ''))}",
-                f"链接：{text_value(item.get('url', ''))}",
-                f"发表日期：{publication_label(item)}",
-                f"期刊 / 来源：{text_value(item.get('journal_or_source', ''))}",
-                f"作者：{text_value(item.get('authors', ''))}",
-                f"最近检索日期：{text_value(item.get('last_seen_date', ''))}",
-                f"首次进入报告：{text_value(item.get('first_seen_date', ''))}",
-                f"相关性分数：{text_value(item.get('relevance_score', ''))}",
-                f"关键词命中：{text_value(item.get('matched_keywords', ''))}",
-                f"是否以前出现过：{seen_text(item)}",
-                "",
-                "英文摘要：",
-                "",
-                text_value(item.get("abstract_en", "")),
-                "",
-                "中文摘要：",
-                "",
-                text_value(item.get("abstract_zh", "")),
-                "",
-                "可能相关原因：",
-            ]
-        )
-        lines.extend(f"- {reason}" for reason in relevance_reasons(item))
-        lines.extend(["", "---", ""])
-
-    path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def _rgb_color(hex_value: str) -> Any:
@@ -830,27 +724,70 @@ def _add_title_block(document: Any, report_date: str) -> None:
     _set_paragraph_bottom_border(paragraph, color="B9CBE0", size="14", space="12")
 
 
+def _add_report_overview(document: Any, payload: dict[str, Any], items: list[dict[str, Any]]) -> None:
+    generated_at = text_value(payload.get("generated_at", ""))
+    lookback_days = text_value(payload.get("lookback_days", "")).strip()
+    cutoff_date = text_value(payload.get("cutoff_date", "")).strip()
+    sources = payload.get("sources", {})
+
+    search_window = ""
+    if lookback_days or cutoff_date:
+        search_window = f"最近 {lookback_days or '?'} 天"
+        if cutoff_date:
+            search_window += f"，起始日期 {cutoff_date}"
+
+    _add_section_heading(document, "检索概览")
+    _add_metadata_table(
+        document,
+        [
+            ("生成时间", generated_at),
+            ("检索窗口", search_window),
+            ("候选文献数", len(items)),
+            ("来源抓取数", format_source_counts(sources if isinstance(sources, dict) else {})),
+        ],
+    )
+
+
 def _add_section_heading(document: Any, text: str) -> None:
     document.add_heading(text, level=1)
 
 
-def _add_doi_list(document: Any, dois: list[str]) -> None:
+def _add_doi_list(document: Any, items: list[dict[str, Any]]) -> None:
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-    if not dois:
+    doi_items = unique_doi_items(items)
+    if not doi_items:
         paragraph = document.add_paragraph("No DOI available")
         for run in paragraph.runs:
             _set_run_font(run)
         return
 
-    table = document.add_table(rows=len(dois), cols=1)
+    table = document.add_table(rows=1, cols=3)
     table.style = "Table Grid"
-    _set_table_geometry(table, [9360])
-    for index, doi in enumerate(dois):
-        cell = table.rows[index].cells[0]
-        cell.text = doi
-        _set_cell_shading(cell, "F8FAFC" if index % 2 == 0 else "FFFFFF")
-        _style_cell_text(cell, size=9.5, color="0B2545", align=WD_ALIGN_PARAGRAPH.LEFT, line_spacing=1.15)
+    column_widths = [1300, 1300, 6760]
+    _set_table_geometry(table, column_widths)
+    _repeat_table_header(table.rows[0])
+    for column_index, column_name in enumerate(["首次检索日期", "论文发表日期", "DOI"]):
+        cell = table.rows[0].cells[column_index]
+        cell.text = column_name
+        _set_cell_shading(cell, "2E74B5")
+        _style_cell_text(cell, size=9, color="FFFFFF", bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, line_spacing=1.05)
+
+    for row_index, item in enumerate(doi_items, start=1):
+        row = table.add_row()
+        fill = "F8FAFC" if row_index % 2 == 0 else "FFFFFF"
+        values = [
+            retrieval_label(item),
+            publication_label(item),
+            text_value(item.get("doi", "")).strip(),
+        ]
+        for column_index, value in enumerate(values):
+            cell = row.cells[column_index]
+            cell.text = value
+            _set_cell_shading(cell, fill)
+            align = WD_ALIGN_PARAGRAPH.LEFT if column_index == 2 else WD_ALIGN_PARAGRAPH.CENTER
+            _style_cell_text(cell, size=9, color="0B2545", align=align, line_spacing=1.15)
+    _set_table_geometry(table, column_widths)
 
 
 def _add_summary_table(document: Any, items: list[dict[str, Any]]) -> None:
@@ -858,7 +795,7 @@ def _add_summary_table(document: Any, items: list[dict[str, Any]]) -> None:
 
     table = document.add_table(rows=1, cols=len(TABLE_COLUMNS))
     table.style = "Table Grid"
-    column_widths = [450, 850, 2450, 2000, 1250, 1400, 1650, 900, 650, 700]
+    column_widths = [450, 850, 850, 2250, 1850, 1150, 1300, 1450, 850, 600, 600]
     _set_table_geometry(table, column_widths)
     _repeat_table_header(table.rows[0])
 
@@ -873,6 +810,7 @@ def _add_summary_table(document: Any, items: list[dict[str, Any]]) -> None:
         fill = "F8FAFC" if row_index % 2 == 0 else "FFFFFF"
         values = [
             str(row_index),
+            retrieval_label(item),
             publication_label(item),
             text_value(item.get("title_en", "")),
             text_value(item.get("title_zh", "")),
@@ -887,7 +825,7 @@ def _add_summary_table(document: Any, items: list[dict[str, Any]]) -> None:
             cell = row.cells[column_index]
             cell.text = value
             _set_cell_shading(cell, fill)
-            align = WD_ALIGN_PARAGRAPH.CENTER if column_index in {0, 1, 8, 9} else WD_ALIGN_PARAGRAPH.LEFT
+            align = WD_ALIGN_PARAGRAPH.CENTER if column_index in {0, 1, 2, 9, 10} else WD_ALIGN_PARAGRAPH.LEFT
             _style_cell_text(cell, size=7.5, color="1F2937", align=align, line_spacing=1.05)
     _set_table_geometry(table, column_widths)
 
@@ -947,22 +885,24 @@ def _clean_word_font_theme(path: Path) -> None:
     temp_path.replace(path)
 
 
-def write_word(path: Path, report_date: str, items: list[dict[str, Any]]) -> None:
+def write_word(path: Path, payload: dict[str, Any], items: list[dict[str, Any]]) -> None:
     try:
         from docx import Document
         from docx.enum.section import WD_SECTION
     except ImportError as error:
         raise RuntimeError("python-docx is required to generate Word reports. Run: pip install -r requirements.txt") from error
 
+    report_date = text_value(payload.get("latest_report_date") or payload.get("report_date") or date.today().isoformat())
     document = Document()
     _configure_section(document.sections[0], landscape=False)
     _configure_document_styles(document)
     _set_running_header_footer(document.sections[0], report_date)
     _add_title_block(document, report_date)
 
+    _add_report_overview(document, payload, items)
+
     _add_section_heading(document, "一、累计 DOI 清单")
-    dois = unique_dois(items)
-    _add_doi_list(document, dois)
+    _add_doi_list(document, items)
 
     if items:
         summary_section = document.add_section(WD_SECTION.NEW_PAGE)
@@ -993,11 +933,11 @@ def write_word(path: Path, report_date: str, items: list[dict[str, Any]]) -> Non
                 ("中文题目", item.get("title_zh", "")),
                 ("DOI", item.get("doi", "")),
                 ("链接", item.get("url", "")),
-                ("发表日期", publication_label(item)),
+                ("首次检索日期", retrieval_label(item)),
+                ("论文发表日期", publication_label(item)),
                 ("期刊 / 来源", item.get("journal_or_source", "")),
                 ("作者", item.get("authors", "")),
                 ("最近检索日期", item.get("last_seen_date", "")),
-                ("首次进入报告", item.get("first_seen_date", "")),
                 ("相关性分数", item.get("relevance_score", "")),
                 ("关键词命中", item.get("matched_keywords", "")),
                 ("是否以前出现过", seen_text(item)),
@@ -1020,7 +960,7 @@ def write_word(path: Path, report_date: str, items: list[dict[str, Any]]) -> Non
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Export literature search results to Word, Markdown, and CSV.")
+    parser = argparse.ArgumentParser(description="Export literature search results to a Word report.")
     parser.add_argument("--config", default="config.yaml", help="Path to config.yaml.")
     parser.add_argument("--input", default=None, help="Input JSON file. Defaults to data/latest_results.json.")
     parser.add_argument("--date", default=None, help="Override report date in YYYY-MM-DD format.")
@@ -1051,16 +991,10 @@ def main() -> None:
 
     cumulative_items = cumulative_payload["items"]
     word_path = report_file_path(config, reports_dir, "word_report_file", "literature_report.docx")
-    markdown_path = report_file_path(config, reports_dir, "markdown_report_file", "literature_report.md")
-    csv_path = report_file_path(config, reports_dir, "csv_report_file", "literature_report.csv")
 
-    write_word(word_path, report_date, cumulative_items)
-    write_markdown(markdown_path, cumulative_payload, cumulative_items)
-    write_csv(csv_path, report_date, cumulative_items)
+    write_word(word_path, cumulative_payload, cumulative_items)
 
     print(f"Saved Word report to {word_path}")
-    print(f"Saved Markdown report to {markdown_path}")
-    print(f"Saved CSV report to {csv_path}")
     print(f"Updated cumulative results at {history_path}")
 
 

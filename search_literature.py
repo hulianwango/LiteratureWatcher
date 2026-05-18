@@ -15,8 +15,6 @@ import feedparser
 import requests
 import yaml
 
-from tencent_translation import load_tencent_translation_config, maybe_translate_items
-
 
 OUTPUT_FIELDS = [
     "title_en",
@@ -1228,8 +1226,6 @@ def main() -> None:
     seen = load_seen(seen_file)
     raw_items, source_counts = fetch_all(config, cutoff, end_date)
     results = dedupe_and_filter(raw_items, seen, config)
-    translation_cache_path = data_dir / "translation_cache.json"
-    results = maybe_translate_items(results, load_tencent_translation_config(cache_path=translation_cache_path))
     update_seen_with_results(seen, results)
     save_seen(seen_file, seen)
 

@@ -1,6 +1,6 @@
 # LiteratureWatcher
 
-LiteratureWatcher performs daily automated literature searches from major metadata databases, biomedical/preprint indexes, open-access indexes, and publisher-specific Crossref searches, then updates one cumulative Word-first report for DOI copying and manual screening.
+LiteratureWatcher performs daily automated literature searches from major metadata databases, biomedical/preprint indexes, open-access indexes, and publisher-specific Crossref searches, then updates one cumulative Word-only report for DOI copying and manual screening.
 
 Google Scholar is not used.
 
@@ -21,13 +21,13 @@ Representative mechanisms include:
 ## Files
 
 - `config.yaml`: Search window, enabled sources, publisher search profiles, source limits, broad topic keywords, scoring weights, and output paths.
-- `search_literature.py`: Queries the configured literature databases and publisher metadata indexes; scores candidates; deduplicates within the current run by DOI or title; marks `previously_seen`; optionally fills Chinese translations; saves JSON results.
-- `export_report.py`: Converts JSON results into Word, Markdown, and CSV reports. Word is the primary output.
+- `search_literature.py`: Queries the configured literature databases and publisher metadata indexes; scores candidates; deduplicates within the current run by DOI or title; marks `previously_seen`; saves JSON results.
+- `export_report.py`: Converts JSON results into the Word report and optionally fills Chinese translations during export.
 - `tencent_translation.py`: Reads optional Tencent Cloud translation settings from `.env`, translates titles and abstracts into Simplified Chinese, and caches translations.
 - `requirements.txt`: Python packages required by the project.
 - `run_daily.bat`: Windows one-click script that runs search first, then exports reports.
 - `data/`: Stores `seen_items.json`, dated JSON result files, `latest_results.json`, and `translation_cache.json`.
-- `reports/`: Stores the cumulative `.docx`, `.md`, and `.csv` reports.
+- `reports/`: Stores the cumulative `.docx` report.
 
 ## Install
 
@@ -60,14 +60,13 @@ Each daily run updates a single cumulative report instead of creating a new Word
 - `data/latest_results.json`
 - `data/cumulative_results.json`
 - `reports/literature_report.docx`
-- `reports/literature_report.md`
-- `reports/literature_report.csv`
 - updated `data/seen_items.json`
 
-The Word report is sorted by publication time in descending order. Items in the same date bucket are sorted by relevance score in descending order. It has three main sections:
+The Word report is sorted by first-seen date in descending order. Items in the same date bucket are sorted by relevance score and publication date in descending order. It has four main sections:
 
-- 累计 DOI 清单: one DOI per line, or `No DOI available`
-- 候选文献总表: publication date, title, source, DOI, link, matched keywords, relevance score, and whether the paper appeared before
+- 检索概览: generation time, search window, candidate count, and source fetch counts
+- 累计 DOI 清单: first-seen date, publication date, and DOI
+- 候选文献总表: first-seen date, publication date, title, source, DOI, link, matched keywords, relevance score, and whether the paper appeared before
 - 详细文献信息: English and Chinese metadata, abstracts, and simple keyword-based relevance reasons
 
 ## Optional Commands
@@ -86,7 +85,7 @@ python search_literature.py --date 2026-05-17
 python search_literature.py --config config.yaml
 ```
 
-Export reports from the latest JSON:
+Export the Word report from the latest JSON:
 
 ```powershell
 python export_report.py

@@ -262,29 +262,6 @@ def translate_text_with_tencent(client: Any, text: str, config: TencentTranslati
     return text_value(data.get("TargetText", "")).strip()
 
 
-def translate_text_with_retries(client: Any, text: str, config: TencentTranslationConfig) -> str:
-    attempts = config.retry_count + 1
-    last_error: Exception | None = None
-
-    for attempt in range(1, attempts + 1):
-        try:
-            if attempt > 1:
-                time.sleep(config.sleep_seconds)
-            return translate_text_with_tencent(client, text, config)
-        except Exception as error:
-            last_error = error
-            if attempt >= attempts or not is_retryable_error(error):
-                raise
-            print(
-                "[WARN] Tencent translation retry "
-                f"{attempt}/{config.retry_count}: {redact_secret(str(error), config)}"
-            )
-
-    if last_error is not None:
-        raise last_error
-    return ""
-
-
 def maybe_translate_items(
     items: list[dict[str, Any]],
     config: TencentTranslationConfig | None,
