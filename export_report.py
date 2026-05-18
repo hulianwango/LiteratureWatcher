@@ -6,6 +6,7 @@ import json
 from datetime import date
 from pathlib import Path
 from typing import Any
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import yaml
 
@@ -340,82 +341,530 @@ def write_markdown(path: Path, payload: dict[str, Any], items: list[dict[str, An
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def write_field(document: Any, label: str, value: Any) -> None:
+def _rgb_color(hex_value: str) -> Any:
+    from docx.shared import RGBColor
+
+    clean = hex_value.strip().lstrip("#")
+    return RGBColor(int(clean[0:2], 16), int(clean[2:4], 16), int(clean[4:6], 16))
+
+
+def _set_rfonts(element: Any, latin_font: str = "Times New Roman", east_asia_font: str = "SimSun") -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    r_pr = element.get_or_add_rPr()
+    r_fonts = r_pr.rFonts
+    if r_fonts is None:
+        r_fonts = OxmlElement("w:rFonts")
+        r_pr.append(r_fonts)
+    r_fonts.set(qn("w:ascii"), latin_font)
+    r_fonts.set(qn("w:hAnsi"), latin_font)
+    r_fonts.set(qn("w:eastAsia"), east_asia_font)
+
+
+def _set_run_font(
+    run: Any,
+    *,
+    size: float | None = None,
+    color: str | None = None,
+    bold: bool | None = None,
+    italic: bool | None = None,
+    latin_font: str = "Times New Roman",
+    east_asia_font: str = "SimSun",
+) -> None:
+    from docx.shared import Pt
+
+    run.font.name = latin_font
+    _set_rfonts(run._element, latin_font, east_asia_font)
+    if size is not None:
+        run.font.size = Pt(size)
+    if color is not None:
+        run.font.color.rgb = _rgb_color(color)
+    if bold is not None:
+        run.bold = bold
+    if italic is not None:
+        run.italic = italic
+
+
+def _set_style_font(
+    style: Any,
+    *,
+    size: float,
+    color: str,
+    bold: bool | None = None,
+    latin_font: str = "Times New Roman",
+    east_asia_font: str = "SimSun",
+) -> None:
+    from docx.shared import Pt
+
+    style.font.name = latin_font
+    _set_rfonts(style._element, latin_font, east_asia_font)
+    style.font.size = Pt(size)
+    style.font.color.rgb = _rgb_color(color)
+    if bold is not None:
+        style.font.bold = bold
+
+
+def _clear_paragraph(paragraph: Any) -> None:
+    paragraph._p.clear_content()
+
+
+def _set_paragraph_bottom_border(paragraph: Any, *, color: str = "D7DEE8", size: str = "12", space: str = "10") -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    p_pr = paragraph._p.get_or_add_pPr()
+    p_bdr = p_pr.find(qn("w:pBdr"))
+    if p_bdr is None:
+        p_bdr = OxmlElement("w:pBdr")
+        p_pr.append(p_bdr)
+    bottom = p_bdr.find(qn("w:bottom"))
+    if bottom is None:
+        bottom = OxmlElement("w:bottom")
+        p_bdr.append(bottom)
+    bottom.set(qn("w:val"), "single")
+    bottom.set(qn("w:sz"), size)
+    bottom.set(qn("w:space"), space)
+    bottom.set(qn("w:color"), color)
+
+
+def _set_cell_shading(cell: Any, fill: str) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tc_pr = cell._tc.get_or_add_tcPr()
+    shading = tc_pr.find(qn("w:shd"))
+    if shading is None:
+        shading = OxmlElement("w:shd")
+        tc_pr.append(shading)
+    shading.set(qn("w:fill"), fill)
+
+
+def _set_cell_margins(cell: Any, *, top: int = 80, bottom: int = 80, start: int = 120, end: int = 120) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tc_pr = cell._tc.get_or_add_tcPr()
+    tc_mar = tc_pr.find(qn("w:tcMar"))
+    if tc_mar is None:
+        tc_mar = OxmlElement("w:tcMar")
+        tc_pr.append(tc_mar)
+    for edge, value in (("top", top), ("bottom", bottom), ("start", start), ("end", end)):
+        margin = tc_mar.find(qn(f"w:{edge}"))
+        if margin is None:
+            margin = OxmlElement(f"w:{edge}")
+            tc_mar.append(margin)
+        margin.set(qn("w:w"), str(value))
+        margin.set(qn("w:type"), "dxa")
+
+
+def _set_cell_borders(cell: Any, *, color: str = "D7DEE8", size: str = "4") -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tc_pr = cell._tc.get_or_add_tcPr()
+    tc_borders = tc_pr.find(qn("w:tcBorders"))
+    if tc_borders is None:
+        tc_borders = OxmlElement("w:tcBorders")
+        tc_pr.append(tc_borders)
+    for edge in ("top", "start", "bottom", "end"):
+        border = tc_borders.find(qn(f"w:{edge}"))
+        if border is None:
+            border = OxmlElement(f"w:{edge}")
+            tc_borders.append(border)
+        border.set(qn("w:val"), "single")
+        border.set(qn("w:sz"), size)
+        border.set(qn("w:space"), "0")
+        border.set(qn("w:color"), color)
+
+
+def _set_table_geometry(table: Any, widths_dxa: list[int], *, indent_dxa: int = 120) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    table.autofit = False
+    tbl = table._tbl
+    tbl_pr = tbl.tblPr
+    for child in list(tbl_pr):
+        if child.tag in {qn("w:tblW"), qn("w:tblInd"), qn("w:tblLayout")}:
+            tbl_pr.remove(child)
+
+    tbl_w = OxmlElement("w:tblW")
+    tbl_w.set(qn("w:w"), str(sum(widths_dxa)))
+    tbl_w.set(qn("w:type"), "dxa")
+    tbl_pr.append(tbl_w)
+
+    tbl_ind = OxmlElement("w:tblInd")
+    tbl_ind.set(qn("w:w"), str(indent_dxa))
+    tbl_ind.set(qn("w:type"), "dxa")
+    tbl_pr.append(tbl_ind)
+
+    tbl_layout = OxmlElement("w:tblLayout")
+    tbl_layout.set(qn("w:type"), "fixed")
+    tbl_pr.append(tbl_layout)
+
+    existing_grid = tbl.tblGrid
+    if existing_grid is not None:
+        tbl.remove(existing_grid)
+    tbl_grid = OxmlElement("w:tblGrid")
+    for width in widths_dxa:
+        grid_col = OxmlElement("w:gridCol")
+        grid_col.set(qn("w:w"), str(width))
+        tbl_grid.append(grid_col)
+    tbl.insert(1, tbl_grid)
+
+    for row in table.rows:
+        for column_index, width in enumerate(widths_dxa):
+            cell = row.cells[column_index]
+            tc_pr = cell._tc.get_or_add_tcPr()
+            for child in list(tc_pr):
+                if child.tag == qn("w:tcW"):
+                    tc_pr.remove(child)
+            tc_w = OxmlElement("w:tcW")
+            tc_w.set(qn("w:w"), str(width))
+            tc_w.set(qn("w:type"), "dxa")
+            tc_pr.append(tc_w)
+
+
+def _repeat_table_header(row: Any) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tr_pr = row._tr.get_or_add_trPr()
+    tbl_header = tr_pr.find(qn("w:tblHeader"))
+    if tbl_header is None:
+        tbl_header = OxmlElement("w:tblHeader")
+        tr_pr.append(tbl_header)
+    tbl_header.set(qn("w:val"), "true")
+
+
+def _style_cell_text(
+    cell: Any,
+    *,
+    size: float = 9,
+    color: str = "1F2937",
+    bold: bool = False,
+    align: Any = None,
+    line_spacing: float = 1.1,
+) -> None:
+    from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+    from docx.shared import Pt
+
+    cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+    _set_cell_margins(cell)
+    _set_cell_borders(cell)
+    for paragraph in cell.paragraphs:
+        if align is not None:
+            paragraph.alignment = align
+        paragraph.paragraph_format.space_before = Pt(0)
+        paragraph.paragraph_format.space_after = Pt(0)
+        paragraph.paragraph_format.line_spacing = line_spacing
+        for run in paragraph.runs:
+            _set_run_font(run, size=size, color=color, bold=bold)
+
+
+def _add_page_number(paragraph: Any) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    begin = OxmlElement("w:fldChar")
+    begin.set(qn("w:fldCharType"), "begin")
+    instr = OxmlElement("w:instrText")
+    instr.set(qn("xml:space"), "preserve")
+    instr.text = "PAGE"
+    separate = OxmlElement("w:fldChar")
+    separate.set(qn("w:fldCharType"), "separate")
+    text = OxmlElement("w:t")
+    text.text = "1"
+    end = OxmlElement("w:fldChar")
+    end.set(qn("w:fldCharType"), "end")
+
+    run = paragraph.add_run()
+    run._r.append(begin)
+    run._r.append(instr)
+    run._r.append(separate)
+    run._r.append(text)
+    run._r.append(end)
+    _set_run_font(run, size=9, color="6B7280")
+
+
+def _configure_section(section: Any, *, landscape: bool = False) -> None:
+    from docx.enum.section import WD_ORIENT
+    from docx.shared import Inches
+
+    section.orientation = WD_ORIENT.LANDSCAPE if landscape else WD_ORIENT.PORTRAIT
+    section.page_width = Inches(11 if landscape else 8.5)
+    section.page_height = Inches(8.5 if landscape else 11)
+    section.top_margin = Inches(1)
+    section.right_margin = Inches(1)
+    section.bottom_margin = Inches(1)
+    section.left_margin = Inches(1)
+    section.header_distance = Inches(0.492)
+    section.footer_distance = Inches(0.492)
+
+
+def _configure_document_styles(document: Any) -> None:
+    from docx.shared import Inches, Pt
+
+    styles = document.styles
+
+    normal = styles["Normal"]
+    _set_style_font(normal, size=11, color="1F2937")
+    normal.paragraph_format.space_before = Pt(0)
+    normal.paragraph_format.space_after = Pt(6)
+    normal.paragraph_format.line_spacing = 1.25
+
+    title = styles["Title"]
+    _set_style_font(title, size=24, color="0B2545", bold=True)
+    title.paragraph_format.space_before = Pt(6)
+    title.paragraph_format.space_after = Pt(14)
+    title.paragraph_format.line_spacing = 1.05
+
+    heading_1 = styles["Heading 1"]
+    _set_style_font(heading_1, size=16, color="2E74B5", bold=True)
+    heading_1.paragraph_format.space_before = Pt(18)
+    heading_1.paragraph_format.space_after = Pt(10)
+    heading_1.paragraph_format.line_spacing = 1.25
+    heading_1.paragraph_format.keep_with_next = True
+
+    heading_2 = styles["Heading 2"]
+    _set_style_font(heading_2, size=13, color="2E74B5", bold=True)
+    heading_2.paragraph_format.space_before = Pt(14)
+    heading_2.paragraph_format.space_after = Pt(7)
+    heading_2.paragraph_format.line_spacing = 1.25
+    heading_2.paragraph_format.keep_with_next = True
+
+    heading_3 = styles["Heading 3"]
+    _set_style_font(heading_3, size=12, color="1F4D78", bold=True)
+    heading_3.paragraph_format.space_before = Pt(10)
+    heading_3.paragraph_format.space_after = Pt(5)
+    heading_3.paragraph_format.line_spacing = 1.25
+    heading_3.paragraph_format.keep_with_next = True
+
+    bullet = styles["List Bullet"]
+    _set_style_font(bullet, size=10.5, color="1F2937")
+    bullet.paragraph_format.left_indent = Inches(0.375)
+    bullet.paragraph_format.first_line_indent = Inches(-0.188)
+    bullet.paragraph_format.space_after = Pt(4)
+    bullet.paragraph_format.line_spacing = 1.25
+
+
+def _set_running_header_footer(section: Any, report_date: str) -> None:
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt
+
+    header = section.header
+    header.is_linked_to_previous = False
+    header_paragraph = header.paragraphs[0]
+    _clear_paragraph(header_paragraph)
+    header_paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    header_paragraph.paragraph_format.space_after = Pt(0)
+    header_run = header_paragraph.add_run(f"每日文献检索报告 · {report_date}")
+    _set_run_font(header_run, size=9, color="6B7280", bold=True)
+
+    footer = section.footer
+    footer.is_linked_to_previous = False
+    footer_paragraph = footer.paragraphs[0]
+    _clear_paragraph(footer_paragraph)
+    footer_paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    footer_paragraph.paragraph_format.space_before = Pt(0)
+    footer_run = footer_paragraph.add_run("第 ")
+    _set_run_font(footer_run, size=9, color="6B7280")
+    _add_page_number(footer_paragraph)
+    end_run = footer_paragraph.add_run(" 页")
+    _set_run_font(end_run, size=9, color="6B7280")
+
+
+def _add_title_block(document: Any, report_date: str) -> None:
+    paragraph = document.add_paragraph(style="Title")
+    run = paragraph.add_run(f"每日文献检索报告 - {report_date}")
+    _set_run_font(run, size=24, color="0B2545", bold=True)
+    _set_paragraph_bottom_border(paragraph, color="B9CBE0", size="14", space="12")
+
+
+def _add_section_heading(document: Any, text: str) -> None:
+    document.add_heading(text, level=1)
+
+
+def _add_doi_list(document: Any, dois: list[str]) -> None:
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    if not dois:
+        paragraph = document.add_paragraph("No DOI available")
+        for run in paragraph.runs:
+            _set_run_font(run)
+        return
+
+    table = document.add_table(rows=len(dois), cols=1)
+    table.style = "Table Grid"
+    _set_table_geometry(table, [9360])
+    for index, doi in enumerate(dois):
+        cell = table.rows[index].cells[0]
+        cell.text = doi
+        _set_cell_shading(cell, "F8FAFC" if index % 2 == 0 else "FFFFFF")
+        _style_cell_text(cell, size=9.5, color="0B2545", align=WD_ALIGN_PARAGRAPH.LEFT, line_spacing=1.15)
+
+
+def _add_summary_table(document: Any, items: list[dict[str, Any]]) -> None:
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    table = document.add_table(rows=1, cols=len(TABLE_COLUMNS))
+    table.style = "Table Grid"
+    column_widths = [500, 2900, 2300, 650, 1350, 1500, 1800, 1040, 800]
+    _set_table_geometry(table, column_widths)
+    _repeat_table_header(table.rows[0])
+
+    for column_index, column_name in enumerate(TABLE_COLUMNS):
+        cell = table.rows[0].cells[column_index]
+        cell.text = column_name
+        _set_cell_shading(cell, "2E74B5")
+        _style_cell_text(cell, size=8, color="FFFFFF", bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, line_spacing=1.05)
+
+    for row_index, item in enumerate(items, start=1):
+        row = table.add_row()
+        fill = "F8FAFC" if row_index % 2 == 0 else "FFFFFF"
+        values = [
+            str(row_index),
+            text_value(item.get("title_en", "")),
+            text_value(item.get("title_zh", "")),
+            text_value(item.get("year", "")),
+            text_value(item.get("journal_or_source", "")),
+            text_value(item.get("doi", "")),
+            text_value(item.get("url", "")),
+            text_value(item.get("matched_keywords", "")),
+            seen_text(item),
+        ]
+        for column_index, value in enumerate(values):
+            cell = row.cells[column_index]
+            cell.text = value
+            _set_cell_shading(cell, fill)
+            align = WD_ALIGN_PARAGRAPH.CENTER if column_index in {0, 3, 8} else WD_ALIGN_PARAGRAPH.LEFT
+            _style_cell_text(cell, size=7.5, color="1F2937", align=align, line_spacing=1.05)
+    _set_table_geometry(table, column_widths)
+
+
+def _add_metadata_table(document: Any, rows: list[tuple[str, Any]]) -> None:
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    table = document.add_table(rows=len(rows), cols=2)
+    table.style = "Table Grid"
+    _set_table_geometry(table, [1700, 7660])
+    for row_index, (label, value) in enumerate(rows):
+        label_cell = table.rows[row_index].cells[0]
+        value_cell = table.rows[row_index].cells[1]
+        label_cell.text = f"{label}："
+        value_cell.text = text_value(value)
+        _set_cell_shading(label_cell, "E8EEF5")
+        _set_cell_shading(value_cell, "FFFFFF")
+        _style_cell_text(label_cell, size=9, color="1F4D78", bold=True, align=WD_ALIGN_PARAGRAPH.LEFT)
+        _style_cell_text(value_cell, size=9, color="1F2937", align=WD_ALIGN_PARAGRAPH.LEFT)
+
+
+def _add_label_paragraph(document: Any, text: str) -> None:
+    from docx.shared import Pt
+
     paragraph = document.add_paragraph()
-    label_run = paragraph.add_run(f"{label}：")
-    label_run.bold = True
-    paragraph.add_run(text_value(value))
+    paragraph.paragraph_format.space_before = Pt(8)
+    paragraph.paragraph_format.space_after = Pt(3)
+    paragraph.paragraph_format.keep_with_next = True
+    run = paragraph.add_run(text)
+    _set_run_font(run, size=10.5, color="1F4D78", bold=True)
+
+
+def _add_body_paragraph(document: Any, text: Any) -> None:
+    paragraph = document.add_paragraph(text_value(text))
+    for run in paragraph.runs:
+        _set_run_font(run, size=10.5, color="1F2937")
+
+
+def _clean_word_font_theme(path: Path) -> None:
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    replacements = {
+        "Calibri": "Times New Roman",
+        "Microsoft YaHei": "SimSun",
+    }
+    target_parts = {"word/fontTable.xml", "word/theme/theme1.xml", "word/styles.xml"}
+
+    with ZipFile(path, "r") as source, ZipFile(temp_path, "w", ZIP_DEFLATED) as target:
+        for info in source.infolist():
+            data = source.read(info.filename)
+            if info.filename in target_parts:
+                text = data.decode("utf-8")
+                for old, new in replacements.items():
+                    text = text.replace(old, new)
+                data = text.encode("utf-8")
+            target.writestr(info, data)
+
+    temp_path.replace(path)
 
 
 def write_word(path: Path, report_date: str, items: list[dict[str, Any]]) -> None:
     try:
         from docx import Document
+        from docx.enum.section import WD_SECTION
     except ImportError as error:
         raise RuntimeError("python-docx is required to generate Word reports. Run: pip install -r requirements.txt") from error
 
     document = Document()
-    document.add_heading(f"每日文献检索报告 - {report_date}", level=0)
+    _configure_section(document.sections[0], landscape=False)
+    _configure_document_styles(document)
+    _set_running_header_footer(document.sections[0], report_date)
+    _add_title_block(document, report_date)
 
-    document.add_heading("一、今日 DOI 清单", level=1)
+    _add_section_heading(document, "一、今日 DOI 清单")
     dois = unique_dois(items)
-    if dois:
-        for doi in dois:
-            document.add_paragraph(doi)
-    else:
-        document.add_paragraph("No DOI available")
+    _add_doi_list(document, dois)
 
-    document.add_heading("二、候选文献总表", level=1)
     if items:
-        table = document.add_table(rows=1, cols=len(TABLE_COLUMNS))
-        table.style = "Table Grid"
-        table.autofit = True
-        header_cells = table.rows[0].cells
-        for column_index, column_name in enumerate(TABLE_COLUMNS):
-            header_cells[column_index].text = column_name
+        summary_section = document.add_section(WD_SECTION.NEW_PAGE)
+        _configure_section(summary_section, landscape=True)
+        _set_running_header_footer(summary_section, report_date)
 
-        for index, item in enumerate(items, start=1):
-            cells = table.add_row().cells
-            values = [
-                str(index),
-                text_value(item.get("title_en", "")),
-                text_value(item.get("title_zh", "")),
-                text_value(item.get("year", "")),
-                text_value(item.get("journal_or_source", "")),
-                text_value(item.get("doi", "")),
-                text_value(item.get("url", "")),
-                text_value(item.get("matched_keywords", "")),
-                seen_text(item),
-            ]
-            for column_index, value in enumerate(values):
-                cells[column_index].text = value
+    _add_section_heading(document, "二、候选文献总表")
+    if items:
+        _add_summary_table(document, items)
     else:
         document.add_paragraph("No candidate literature was found.")
 
-    document.add_heading("三、详细文献信息", level=1)
+    if items:
+        detail_section = document.add_section(WD_SECTION.NEW_PAGE)
+        _configure_section(detail_section, landscape=False)
+        _set_running_header_footer(detail_section, report_date)
+
+    _add_section_heading(document, "三、详细文献信息")
     if not items:
         document.add_paragraph("No candidate literature was found.")
 
     for index, item in enumerate(items, start=1):
         title_en = text_value(item.get("title_en", "")).strip() or "(No English title)"
         document.add_heading(f"{index}. {title_en}", level=2)
-        write_field(document, "中文题目", item.get("title_zh", ""))
-        write_field(document, "DOI", item.get("doi", ""))
-        write_field(document, "链接", item.get("url", ""))
-        write_field(document, "年份", item.get("year", ""))
-        write_field(document, "期刊 / 来源", item.get("journal_or_source", ""))
-        write_field(document, "作者", item.get("authors", ""))
-        write_field(document, "关键词命中", item.get("matched_keywords", ""))
-        write_field(document, "是否以前出现过", seen_text(item))
+        _add_metadata_table(
+            document,
+            [
+                ("中文题目", item.get("title_zh", "")),
+                ("DOI", item.get("doi", "")),
+                ("链接", item.get("url", "")),
+                ("年份", item.get("year", "")),
+                ("期刊 / 来源", item.get("journal_or_source", "")),
+                ("作者", item.get("authors", "")),
+                ("关键词命中", item.get("matched_keywords", "")),
+                ("是否以前出现过", seen_text(item)),
+            ],
+        )
 
-        document.add_paragraph("英文摘要：")
-        document.add_paragraph(text_value(item.get("abstract_en", "")))
-        document.add_paragraph("中文摘要：")
-        document.add_paragraph(text_value(item.get("abstract_zh", "")))
-        document.add_paragraph("可能相关原因：")
+        _add_label_paragraph(document, "英文摘要：")
+        _add_body_paragraph(document, item.get("abstract_en", ""))
+        _add_label_paragraph(document, "中文摘要：")
+        _add_body_paragraph(document, item.get("abstract_zh", ""))
+        _add_label_paragraph(document, "可能相关原因：")
         for reason in relevance_reasons(item):
-            document.add_paragraph(reason, style="List Bullet")
+            paragraph = document.add_paragraph(reason, style="List Bullet")
+            for run in paragraph.runs:
+                _set_run_font(run, size=10.5, color="1F2937")
 
+    path.parent.mkdir(parents=True, exist_ok=True)
     document.save(path)
+    _clean_word_font_theme(path)
 
 
 def parse_args() -> argparse.Namespace:
