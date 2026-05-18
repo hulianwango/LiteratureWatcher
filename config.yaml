@@ -1,14 +1,47 @@
 lookback_days: 7
 
+enabled_sources:
+  - crossref
+  - openalex
+  - publishers
+  - semantic_scholar
+  - pubmed
+  - europe_pmc
+  - arxiv
+  - doaj
+  - biorxiv
+  - medrxiv
+
 max_results_per_source:
-  arxiv: 100
   crossref: 100
+  openalex: 100
+  publishers: 30
+  semantic_scholar: 80
   pubmed: 100
+  europe_pmc: 100
+  arxiv: 100
+  doaj: 60
+  biorxiv: 50
+  medrxiv: 50
+
+max_query_terms: 36
+
+max_query_terms_per_source:
+  pubmed: 32
+  europe_pmc: 28
+  arxiv: 32
+
+recent_feed_pages:
+  biorxiv: 3
+  medrxiv: 3
 
 request_timeout_seconds: 25
+request_retry_count: 2
+request_retry_sleep_seconds: 1.5
 min_relevance_score: 1.0
 
 user_agent: "LiteratureWatcher/0.1 (mailto:your_email@example.com)"
+openalex_mailto: "your_email@example.com"
 
 paths:
   data_dir: "data"
@@ -19,6 +52,70 @@ paths:
 scoring:
   title_multiplier: 3.0
   abstract_multiplier: 1.0
+
+publisher_searches:
+  - id: nature
+    label: "Nature Portfolio"
+    crossref_member: 297
+    container_query: "Nature Nature Communications Scientific Reports Nature Photonics Nature Nanotechnology Nature Materials Nature Chemistry Communications Materials Communications Chemistry"
+    match_terms:
+      - "Nature"
+      - "Nature Communications"
+      - "Scientific Reports"
+      - "Communications Materials"
+      - "Communications Chemistry"
+  - id: springer
+    label: "Springer Nature"
+    crossref_member: 297
+  - id: science_aaas
+    label: "Science / AAAS"
+    crossref_member: 221
+    container_query: "Science Science Advances Science Robotics Science Signaling"
+  - id: acs
+    label: "American Chemical Society"
+    crossref_member: 316
+  - id: rsc
+    label: "Royal Society of Chemistry"
+    crossref_member: 292
+  - id: wiley
+    label: "Wiley"
+    crossref_member: 311
+  - id: elsevier
+    label: "Elsevier"
+    crossref_member: 78
+  - id: taylor_francis
+    label: "Taylor & Francis / Informa"
+    crossref_member: 301
+  - id: ieee
+    label: "IEEE"
+    crossref_member: 263
+  - id: optica
+    label: "Optica Publishing Group"
+    crossref_member: 285
+  - id: iop
+    label: "IOP Publishing"
+    crossref_member: 266
+  - id: aip
+    label: "AIP Publishing"
+    crossref_member: 317
+  - id: mdpi
+    label: "MDPI"
+    crossref_member: 1968
+  - id: frontiers
+    label: "Frontiers"
+    crossref_member: 1965
+  - id: plos
+    label: "PLOS"
+    crossref_member: 340
+  - id: sage
+    label: "SAGE"
+    crossref_member: 179
+  - id: oup
+    label: "Oxford University Press"
+    crossref_member: 286
+  - id: cup
+    label: "Cambridge University Press"
+    crossref_member: 56
 
 keywords:
   - term: "organic molecule"
@@ -155,6 +252,40 @@ keywords:
     weight: 2
 
 source_query_terms:
+  default:
+    - "organic molecule"
+    - "dye"
+    - "chromophore"
+    - "photosensitizer"
+    - "molecular antenna"
+    - "organic antenna"
+    - "gold nanoparticle"
+    - "gold nanoparticles"
+    - "Au nanoparticle"
+    - "Au nanorod"
+    - "gold nanorod"
+    - "gold nanostar"
+    - "gold nanoshell"
+    - "gold nanoarray"
+    - "plasmonic gold"
+    - "localized surface plasmon resonance"
+    - "LSPR"
+    - "plasmon-mediated energy transfer"
+    - "plasmon-enhanced luminescence"
+    - "molecule-to-metal energy transfer"
+    - "metal-to-lanthanide energy transfer"
+    - "plasmon-exciton coupling"
+    - "lanthanide nanoparticle"
+    - "rare-earth nanoparticle"
+    - "upconversion nanoparticle"
+    - "NaErF4"
+    - "NaYF4:Er"
+    - "NaYF4:Yb,Er"
+    - "Er3+"
+    - "lanthanide luminescence"
+    - "4f transition"
+    - "energy transfer"
+    - "sensitization"
   arxiv:
     - "organic molecule"
     - "dye"

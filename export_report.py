@@ -146,6 +146,13 @@ def unique_dois(items: list[dict[str, Any]]) -> list[str]:
     return dois
 
 
+def format_source_counts(sources: dict[str, Any]) -> str:
+    parts = []
+    for source, count in sorted(sources.items()):
+        parts.append(f"{source}={count}")
+    return ", ".join(parts) if parts else "No source counts available"
+
+
 def markdown_cell(value: Any) -> str:
     return text_value(value).replace("\n", " ").replace("|", "\\|").strip()
 
@@ -267,7 +274,7 @@ def write_markdown(path: Path, payload: dict[str, Any], items: list[dict[str, An
         f"生成时间：{generated_at}",
         f"检索窗口：最近 {lookback_days} 天，起始日期 {cutoff_date}",
         f"候选文献数：{len(items)}",
-        f"来源抓取数：arXiv={sources.get('arxiv', 0)}, Crossref={sources.get('crossref', 0)}, PubMed={sources.get('pubmed', 0)}",
+        f"来源抓取数：{format_source_counts(sources)}",
         "",
         "## 一、今日 DOI 清单",
         "",

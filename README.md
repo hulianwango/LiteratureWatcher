@@ -1,8 +1,10 @@
 # LiteratureWatcher
 
-LiteratureWatcher performs daily automated literature searches from Crossref, PubMed, and arXiv, then exports a Word-first daily report for DOI copying and manual screening.
+LiteratureWatcher performs daily automated literature searches from major metadata databases, biomedical/preprint indexes, open-access indexes, and publisher-specific Crossref searches, then exports a Word-first daily report for DOI copying and manual screening.
 
 Google Scholar is not used.
+
+Default sources now include Crossref, OpenAlex, Semantic Scholar, PubMed, Europe PMC, arXiv, DOAJ, bioRxiv, and medRxiv. The `publishers` source expands into publisher-specific searches for Nature Portfolio, Springer Nature, Science / AAAS, ACS, RSC, Wiley, Elsevier, Taylor & Francis / Informa, IEEE, Optica, IOP, AIP, MDPI, Frontiers, PLOS, SAGE, Oxford University Press, and Cambridge University Press. These publisher searches retrieve metadata and links; they do not require PDF download access.
 
 ## Current Topic
 
@@ -18,8 +20,8 @@ Representative mechanisms include:
 
 ## Files
 
-- `config.yaml`: Search window, source limits, broad topic keywords, scoring weights, and output paths.
-- `search_literature.py`: Queries arXiv, Crossref, and PubMed; scores candidates; deduplicates within the current run by DOI or title; marks `previously_seen`; optionally fills Chinese translations; saves JSON results.
+- `config.yaml`: Search window, enabled sources, publisher search profiles, source limits, broad topic keywords, scoring weights, and output paths.
+- `search_literature.py`: Queries the configured literature databases and publisher metadata indexes; scores candidates; deduplicates within the current run by DOI or title; marks `previously_seen`; optionally fills Chinese translations; saves JSON results.
 - `export_report.py`: Converts JSON results into Word, Markdown, and CSV reports. Word is the primary output.
 - `tencent_translation.py`: Reads optional Tencent Cloud translation settings from `.env`, translates titles and abstracts into Simplified Chinese, and caches translations.
 - `requirements.txt`: Python packages required by the project.
