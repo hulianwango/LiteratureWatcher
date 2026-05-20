@@ -1,5 +1,31 @@
 lookback_days: 7
 
+publication_year_range:
+  enabled: false
+  start_year: 2012
+  end_year: 2026
+
+historical_search:
+  enabled: true
+  lookback_years: 15
+  sources:
+    - crossref
+    - openalex
+    - semantic_scholar
+    - pubmed
+    - europe_pmc
+    - arxiv
+    - doaj
+  min_relevance_score: 6.0
+  max_results_per_source:
+    crossref: 80
+    openalex: 80
+    semantic_scholar: 80
+    pubmed: 80
+    europe_pmc: 80
+    arxiv: 50
+    doaj: 40
+
 enabled_sources:
   - crossref
   - openalex
@@ -24,12 +50,12 @@ max_results_per_source:
   biorxiv: 50
   medrxiv: 50
 
-max_query_terms: 36
+max_query_terms: 120
 
 max_query_terms_per_source:
-  pubmed: 32
-  europe_pmc: 28
-  arxiv: 32
+  pubmed: 120
+  europe_pmc: 120
+  arxiv: 120
 
 recent_feed_pages:
   biorxiv: 3
@@ -126,19 +152,33 @@ keywords:
     weight: 3
   - term: "organic molecules"
     weight: 3
+  - term: "organic dye"
+    weight: 4
+  - term: "organic dyes"
+    weight: 4
   - term: "dye"
     weight: 3
   - term: "dye-sensitized"
     weight: 4
   - term: "chromophore"
     weight: 3
+  - term: "fluorophore"
+    weight: 3
   - term: "photosensitizer"
+    weight: 3
+  - term: "photosensitization"
+    weight: 3
+  - term: "sensitizer"
     weight: 3
   - term: "molecular antenna"
     weight: 4
   - term: "organic antenna"
     weight: 4
+  - term: "antenna effect"
+    weight: 4
   - term: "antenna sensitization"
+    weight: 4
+  - term: "ligand sensitization"
     weight: 4
   - term: "gold nanoparticle"
     weight: 5
@@ -148,10 +188,16 @@ keywords:
     weight: 5
   - term: "Au nanoparticles"
     weight: 5
+  - term: "AuNP"
+    weight: 5
   - term: "Au nanorod"
     weight: 5
   - term: "Au nanorods"
     weight: 5
+  - term: "AuNR"
+    weight: 5
+  - term: "GNP"
+    weight: 4
   - term: "gold nanorod"
     weight: 5
   - term: "gold nanorods"
@@ -176,8 +222,28 @@ keywords:
     weight: 5
   - term: "gold nanostructures"
     weight: 5
+  - term: "gold nanosphere"
+    weight: 5
+  - term: "gold nanospheres"
+    weight: 5
+  - term: "gold nanoprism"
+    weight: 5
+  - term: "gold nanoprisms"
+    weight: 5
+  - term: "gold nanocage"
+    weight: 5
+  - term: "gold nanocages"
+    weight: 5
+  - term: "gold nanobipyramid"
+    weight: 5
+  - term: "gold nanobipyramids"
+    weight: 5
   - term: "plasmonic gold"
     weight: 5
+  - term: "plasmonic nanoparticle"
+    weight: 4
+  - term: "plasmonic nanoparticles"
+    weight: 4
   - term: "localized surface plasmon resonance"
     weight: 5
   - term: "LSPR"
@@ -188,6 +254,12 @@ keywords:
     weight: 5
   - term: "plasmon-enhanced luminescence"
     weight: 6
+  - term: "plasmon-enhanced fluorescence"
+    weight: 5
+  - term: "surface-enhanced fluorescence"
+    weight: 5
+  - term: "SEF"
+    weight: 4
   - term: "plasmonic enhancement"
     weight: 4
   - term: "molecule-to-metal energy transfer"
@@ -214,6 +286,12 @@ keywords:
     weight: 6
   - term: "lanthanide-doped nanoparticles"
     weight: 6
+  - term: "lanthanide-doped nanocrystal"
+    weight: 6
+  - term: "lanthanide-doped nanocrystals"
+    weight: 6
+  - term: "rare earth doped"
+    weight: 5
   - term: "upconversion nanoparticle"
     weight: 6
   - term: "upconversion nanoparticles"
@@ -228,18 +306,34 @@ keywords:
     weight: 7
   - term: "NaYF4"
     weight: 4
+  - term: "beta-NaYF4"
+    weight: 5
+  - term: "NaREF4"
+    weight: 5
   - term: "Er3+"
     weight: 5
   - term: "Er 3+"
     weight: 5
   - term: "erbium"
     weight: 4
+  - term: "Ln3+"
+    weight: 4
   - term: "Yb,Er"
     weight: 5
   - term: "Yb3+/Er3+"
     weight: 5
+  - term: "Yb3+"
+    weight: 4
+  - term: "Nd3+"
+    weight: 4
+  - term: "Tm3+"
+    weight: 4
+  - term: "Ho3+"
+    weight: 4
   - term: "lanthanide luminescence"
     weight: 6
+  - term: "NIR-II luminescence"
+    weight: 5
   - term: "4f transition"
     weight: 6
   - term: "4f"
@@ -256,139 +350,107 @@ keywords:
     weight: 2
 
 source_query_terms:
-  default:
+  default: &complete_search_terms
     - "organic molecule"
+    - "organic molecules"
+    - "organic dye"
+    - "organic dyes"
     - "dye"
+    - "dye-sensitized"
     - "chromophore"
+    - "fluorophore"
     - "photosensitizer"
+    - "photosensitization"
+    - "sensitizer"
     - "molecular antenna"
     - "organic antenna"
+    - "antenna effect"
+    - "antenna sensitization"
+    - "ligand sensitization"
     - "gold nanoparticle"
     - "gold nanoparticles"
     - "Au nanoparticle"
+    - "Au nanoparticles"
+    - "AuNP"
     - "Au nanorod"
+    - "Au nanorods"
+    - "AuNR"
+    - "GNP"
     - "gold nanorod"
+    - "gold nanorods"
     - "gold nanostar"
+    - "gold nanostars"
     - "gold nanoshell"
+    - "gold nanoshells"
+    - "gold shell"
+    - "gold film"
     - "gold nanoarray"
+    - "gold nanoarrays"
+    - "gold nanostructure"
+    - "gold nanostructures"
+    - "gold nanosphere"
+    - "gold nanospheres"
+    - "gold nanoprism"
+    - "gold nanoprisms"
+    - "gold nanocage"
+    - "gold nanocages"
+    - "gold nanobipyramid"
+    - "gold nanobipyramids"
     - "plasmonic gold"
+    - "plasmonic nanoparticle"
+    - "plasmonic nanoparticles"
     - "localized surface plasmon resonance"
     - "LSPR"
     - "plasmon-mediated energy transfer"
+    - "plasmon enhanced energy transfer"
     - "plasmon-enhanced luminescence"
+    - "plasmon-enhanced fluorescence"
+    - "surface-enhanced fluorescence"
+    - "SEF"
+    - "plasmonic enhancement"
     - "molecule-to-metal energy transfer"
     - "metal-to-lanthanide energy transfer"
+    - "metal enhanced fluorescence"
     - "plasmon-exciton coupling"
     - "lanthanide nanoparticle"
+    - "lanthanide nanoparticles"
     - "rare-earth nanoparticle"
+    - "rare-earth nanoparticles"
+    - "rare-earth nanocrystal"
+    - "rare-earth nanocrystals"
+    - "lanthanide-doped nanoparticle"
+    - "lanthanide-doped nanoparticles"
+    - "lanthanide-doped nanocrystal"
+    - "lanthanide-doped nanocrystals"
+    - "rare earth doped"
     - "upconversion nanoparticle"
+    - "upconversion nanoparticles"
+    - "UCNP"
     - "NaErF4"
     - "NaYF4:Er"
     - "NaYF4:Yb,Er"
+    - "NaYF4"
+    - "beta-NaYF4"
+    - "NaREF4"
     - "Er3+"
+    - "Er 3+"
+    - "erbium"
+    - "Ln3+"
+    - "Yb,Er"
+    - "Yb3+/Er3+"
+    - "Yb3+"
+    - "Nd3+"
+    - "Tm3+"
+    - "Ho3+"
     - "lanthanide luminescence"
+    - "NIR-II luminescence"
     - "4f transition"
+    - "4f"
     - "energy transfer"
     - "sensitization"
-  arxiv:
-    - "organic molecule"
-    - "dye"
-    - "chromophore"
-    - "photosensitizer"
-    - "molecular antenna"
-    - "organic antenna"
-    - "gold nanoparticle"
-    - "gold nanoparticles"
-    - "Au nanoparticle"
-    - "Au nanorod"
-    - "gold nanorod"
-    - "gold nanostar"
-    - "gold nanoshell"
-    - "gold nanoarray"
-    - "plasmonic gold"
-    - "localized surface plasmon resonance"
-    - "LSPR"
-    - "plasmon-mediated energy transfer"
-    - "plasmon-enhanced luminescence"
-    - "molecule-to-metal energy transfer"
-    - "metal-to-lanthanide energy transfer"
-    - "plasmon-exciton coupling"
-    - "lanthanide nanoparticle"
-    - "rare-earth nanoparticle"
-    - "upconversion nanoparticle"
-    - "NaErF4"
-    - "NaYF4:Er"
-    - "NaYF4:Yb,Er"
-    - "Er3+"
-    - "lanthanide luminescence"
-    - "4f transition"
-    - "energy transfer"
-    - "sensitization"
-  crossref:
-    - "organic molecule"
-    - "dye"
-    - "chromophore"
-    - "photosensitizer"
-    - "molecular antenna"
-    - "organic antenna"
-    - "gold nanoparticle"
-    - "gold nanoparticles"
-    - "Au nanoparticle"
-    - "Au nanorod"
-    - "gold nanorod"
-    - "gold nanostar"
-    - "gold nanoshell"
-    - "gold nanoarray"
-    - "plasmonic gold"
-    - "localized surface plasmon resonance"
-    - "LSPR"
-    - "plasmon-mediated energy transfer"
-    - "plasmon-enhanced luminescence"
-    - "molecule-to-metal energy transfer"
-    - "metal-to-lanthanide energy transfer"
-    - "plasmon-exciton coupling"
-    - "lanthanide nanoparticle"
-    - "rare-earth nanoparticle"
-    - "upconversion nanoparticle"
-    - "NaErF4"
-    - "NaYF4:Er"
-    - "NaYF4:Yb,Er"
-    - "Er3+"
-    - "lanthanide luminescence"
-    - "4f transition"
-    - "energy transfer"
-    - "sensitization"
-  pubmed:
-    - "organic molecule"
-    - "dye"
-    - "chromophore"
-    - "photosensitizer"
-    - "molecular antenna"
-    - "organic antenna"
-    - "gold nanoparticle"
-    - "gold nanoparticles"
-    - "Au nanoparticle"
-    - "Au nanorod"
-    - "gold nanorod"
-    - "gold nanostar"
-    - "gold nanoshell"
-    - "gold nanoarray"
-    - "plasmonic gold"
-    - "localized surface plasmon resonance"
-    - "LSPR"
-    - "plasmon-mediated energy transfer"
-    - "plasmon-enhanced luminescence"
-    - "molecule-to-metal energy transfer"
-    - "metal-to-lanthanide energy transfer"
-    - "plasmon-exciton coupling"
-    - "lanthanide nanoparticle"
-    - "rare-earth nanoparticle"
-    - "upconversion nanoparticle"
-    - "NaErF4"
-    - "NaYF4:Er"
-    - "NaYF4:Yb,Er"
-    - "Er3+"
-    - "lanthanide luminescence"
-    - "4f transition"
-    - "energy transfer"
-    - "sensitization"
+    - "upconversion"
+    - "surface plasmon"
+    - "plasmon"
+  arxiv: *complete_search_terms
+  crossref: *complete_search_terms
+  pubmed: *complete_search_terms

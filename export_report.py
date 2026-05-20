@@ -10,6 +10,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 import yaml
 
+from app_paths import change_to_config_dir, resolve_config_path, setup_utf8_console
 from tencent_translation import load_tencent_translation_config, maybe_translate_items
 
 
@@ -28,6 +29,7 @@ ITEM_FIELDS = [
     "matched_keywords",
     "relevance_score",
     "reason",
+    "search_scope",
 ]
 
 TABLE_COLUMNS = [
@@ -42,6 +44,66 @@ TABLE_COLUMNS = [
     "关键词命中",
     "相关性",
     "是否以前出现过",
+]
+
+HISTORICAL_TABLE_COLUMNS = [
+    "序号",
+    "论文发表日期",
+    "英文题目",
+    "中文题目",
+    "期刊 / 来源",
+    "DOI",
+    "链接",
+    "关键词命中",
+    "相关性",
+]
+
+ORGANIC_TERMS = [
+    "organic molecule",
+    "dye",
+    "chromophore",
+    "photosensitizer",
+    "molecular antenna",
+    "organic antenna",
+    "dye-sensitized",
+]
+
+GOLD_TERMS = [
+    "gold nanoparticle",
+    "gold nanoparticles",
+    "au nanoparticle",
+    "au nanoparticles",
+    "au nanorod",
+    "gold nanorod",
+    "gold nanostar",
+    "gold nanoshell",
+    "gold shell",
+    "gold film",
+    "gold nanoarray",
+    "plasmonic gold",
+    "gold nanostructure",
+]
+
+PLASMON_TERMS = [
+    "plasmon",
+    "lspr",
+    "localized surface plasmon resonance",
+    "plasmon-mediated energy transfer",
+    "plasmon-enhanced luminescence",
+    "plasmonic enhancement",
+]
+
+LANTHANIDE_TERMS = [
+    "lanthanide",
+    "rare-earth",
+    "upconversion nanoparticle",
+    "upconversion nanoparticles",
+    "ucnp",
+    "naerf4",
+    "nayf4",
+    "er3+",
+    "er 3+",
+    "erbium",
 ]
 
 
@@ -215,6 +277,17 @@ def sort_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
 
 
+def sort_historical_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        items,
+        key=lambda item: (
+            item_relevance_score(item),
+            item_publication_sort_date(item),
+        ),
+        reverse=True,
+    )
+
+
 def normalize_item(item: dict[str, Any]) -> dict[str, Any]:
     normalized = {field: text_value(item.get(field, "")) for field in ITEM_FIELDS}
     normalized["title_en"] = normalized["title_en"] or text_value(item.get("title", ""))
@@ -261,12 +334,19 @@ def merge_cumulative_results(
         merged[key] = current
 
     items = sort_items(list(merged.values()))
+    historical_items = sort_historical_items(
+        [normalize_item(item) for item in current_payload.get("historical_items", [])]
+    )
     return {
         "generated_at": current_payload.get("generated_at", ""),
         "latest_report_date": report_date,
         "lookback_days": current_payload.get("lookback_days", ""),
         "cutoff_date": current_payload.get("cutoff_date", ""),
         "sources": current_payload.get("sources", {}),
+        "historical_lookback_years": current_payload.get("historical_lookback_years", ""),
+        "historical_cutoff_date": current_payload.get("historical_cutoff_date", ""),
+        "historical_sources": current_payload.get("historical_sources", {}),
+        "historical_items": historical_items,
         "items": items,
     }
 
@@ -307,61 +387,17 @@ def has_any(text: str, needles: list[str]) -> bool:
 
 def relevance_reasons(item: dict[str, Any]) -> list[str]:
     text = item_text_blob(item)
-    organic_terms = [
-        "organic molecule",
-        "dye",
-        "chromophore",
-        "photosensitizer",
-        "molecular antenna",
-        "organic antenna",
-        "dye-sensitized",
-    ]
-    gold_terms = [
-        "gold nanoparticle",
-        "gold nanoparticles",
-        "au nanoparticle",
-        "au nanoparticles",
-        "au nanorod",
-        "gold nanorod",
-        "gold nanostar",
-        "gold nanoshell",
-        "gold shell",
-        "gold film",
-        "gold nanoarray",
-        "plasmonic gold",
-        "gold nanostructure",
-    ]
-    plasmon_terms = [
-        "plasmon",
-        "lspr",
-        "localized surface plasmon resonance",
-        "plasmon-mediated energy transfer",
-        "plasmon-enhanced luminescence",
-        "plasmonic enhancement",
-    ]
-    lanthanide_terms = [
-        "lanthanide",
-        "rare-earth",
-        "upconversion nanoparticle",
-        "upconversion nanoparticles",
-        "ucnp",
-        "naerf4",
-        "nayf4",
-        "er3+",
-        "er 3+",
-        "erbium",
-    ]
     reasons: list[str] = []
 
-    if has_any(text, organic_terms) and has_any(text, gold_terms):
+    if has_any(text, ORGANIC_TERMS) and has_any(text, GOLD_TERMS):
         reasons.append("包含 organic molecule / dye 与 gold nanoparticle coupling 相关关键词")
-    if "plasmon-mediated energy transfer" in text or (has_any(text, plasmon_terms) and "energy transfer" in text):
+    if "plasmon-mediated energy transfer" in text or (has_any(text, PLASMON_TERMS) and "energy transfer" in text):
         reasons.append("包含 plasmon-mediated energy transfer 或 plasmonic energy-transfer 线索")
-    if has_any(text, plasmon_terms) and has_any(text, lanthanide_terms):
+    if has_any(text, PLASMON_TERMS) and has_any(text, LANTHANIDE_TERMS):
         reasons.append("包含 plasmon-enhanced lanthanide luminescence / upconversion 相关线索")
-    if has_any(text, gold_terms):
+    if has_any(text, GOLD_TERMS):
         reasons.append("包含 gold nanorod / Au nanoparticle / plasmonic gold nanostructure 相关线索")
-    if has_any(text, organic_terms) and has_any(text, lanthanide_terms):
+    if has_any(text, ORGANIC_TERMS) and has_any(text, LANTHANIDE_TERMS):
         reasons.append("包含 organic antenna sensitization of lanthanide nanoparticles 线索")
     if "molecule-to-metal energy transfer" in text:
         reasons.append("包含 molecule-to-metal energy transfer")
@@ -724,28 +760,53 @@ def _add_title_block(document: Any, report_date: str) -> None:
     _set_paragraph_bottom_border(paragraph, color="B9CBE0", size="14", space="12")
 
 
-def _add_report_overview(document: Any, payload: dict[str, Any], items: list[dict[str, Any]]) -> None:
+def _add_report_overview(
+    document: Any,
+    payload: dict[str, Any],
+    items: list[dict[str, Any]],
+    historical_items: list[dict[str, Any]] | None = None,
+) -> None:
     generated_at = text_value(payload.get("generated_at", ""))
     lookback_days = text_value(payload.get("lookback_days", "")).strip()
     cutoff_date = text_value(payload.get("cutoff_date", "")).strip()
     sources = payload.get("sources", {})
+    historical_items = historical_items or []
+    historical_years = text_value(payload.get("historical_lookback_years", "")).strip()
+    historical_cutoff = text_value(payload.get("historical_cutoff_date", "")).strip()
+    historical_sources = payload.get("historical_sources", {})
+    year_range = payload.get("publication_year_range", {})
+    year_range = year_range if isinstance(year_range, dict) else {}
+    start_year = text_value(year_range.get("start_year", "")).strip()
+    end_year = text_value(year_range.get("end_year", "")).strip()
 
     search_window = ""
-    if lookback_days or cutoff_date:
+    if start_year and end_year:
+        search_window = f"发表年份范围：{start_year}-{end_year}"
+    elif lookback_days or cutoff_date:
         search_window = f"最近 {lookback_days or '?'} 天"
         if cutoff_date:
             search_window += f"，起始日期 {cutoff_date}"
 
+    rows = [
+        ("生成时间", generated_at),
+        ("检索窗口", search_window),
+        ("候选文献数", len(items)),
+        ("来源抓取数", format_source_counts(sources if isinstance(sources, dict) else {})),
+    ]
+    if historical_years or historical_cutoff or historical_items:
+        historical_window = f"最近 {historical_years or '?'} 年"
+        if historical_cutoff:
+            historical_window += f"，起始日期 {historical_cutoff}"
+        rows.extend(
+            [
+                ("扩展检索窗口", historical_window),
+                ("扩展相关文献数", len(historical_items)),
+                ("扩展来源抓取数", format_source_counts(historical_sources if isinstance(historical_sources, dict) else {})),
+            ]
+        )
+
     _add_section_heading(document, "检索概览")
-    _add_metadata_table(
-        document,
-        [
-            ("生成时间", generated_at),
-            ("检索窗口", search_window),
-            ("候选文献数", len(items)),
-            ("来源抓取数", format_source_counts(sources if isinstance(sources, dict) else {})),
-        ],
-    )
+    _add_metadata_table(document, rows)
 
 
 def _add_section_heading(document: Any, text: str) -> None:
@@ -830,6 +891,44 @@ def _add_summary_table(document: Any, items: list[dict[str, Any]]) -> None:
     _set_table_geometry(table, column_widths)
 
 
+def _add_historical_summary_table(document: Any, items: list[dict[str, Any]]) -> None:
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    table = document.add_table(rows=1, cols=len(HISTORICAL_TABLE_COLUMNS))
+    table.style = "Table Grid"
+    column_widths = [450, 950, 2700, 2150, 1350, 1350, 1700, 1100, 700]
+    _set_table_geometry(table, column_widths)
+    _repeat_table_header(table.rows[0])
+
+    for column_index, column_name in enumerate(HISTORICAL_TABLE_COLUMNS):
+        cell = table.rows[0].cells[column_index]
+        cell.text = column_name
+        _set_cell_shading(cell, "2E74B5")
+        _style_cell_text(cell, size=8, color="FFFFFF", bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, line_spacing=1.05)
+
+    for row_index, item in enumerate(items, start=1):
+        row = table.add_row()
+        fill = "F8FAFC" if row_index % 2 == 0 else "FFFFFF"
+        values = [
+            str(row_index),
+            publication_label(item),
+            text_value(item.get("title_en", "")),
+            text_value(item.get("title_zh", "")),
+            text_value(item.get("journal_or_source", "")),
+            text_value(item.get("doi", "")),
+            text_value(item.get("url", "")),
+            text_value(item.get("matched_keywords", "")),
+            text_value(item.get("relevance_score", "")),
+        ]
+        for column_index, value in enumerate(values):
+            cell = row.cells[column_index]
+            cell.text = value
+            _set_cell_shading(cell, fill)
+            align = WD_ALIGN_PARAGRAPH.CENTER if column_index in {0, 1, 8} else WD_ALIGN_PARAGRAPH.LEFT
+            _style_cell_text(cell, size=7.5, color="1F2937", align=align, line_spacing=1.05)
+    _set_table_geometry(table, column_widths)
+
+
 def _add_metadata_table(document: Any, rows: list[tuple[str, Any]]) -> None:
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
@@ -893,13 +992,17 @@ def write_word(path: Path, payload: dict[str, Any], items: list[dict[str, Any]])
         raise RuntimeError("python-docx is required to generate Word reports. Run: pip install -r requirements.txt") from error
 
     report_date = text_value(payload.get("latest_report_date") or payload.get("report_date") or date.today().isoformat())
+    historical_items = sort_historical_items(
+        [normalize_item(item) for item in payload.get("historical_items", [])]
+    )
+    historical_years = text_value(payload.get("historical_lookback_years", "")).strip()
     document = Document()
     _configure_section(document.sections[0], landscape=False)
     _configure_document_styles(document)
     _set_running_header_footer(document.sections[0], report_date)
     _add_title_block(document, report_date)
 
-    _add_report_overview(document, payload, items)
+    _add_report_overview(document, payload, items, historical_items)
 
     _add_section_heading(document, "一、累计 DOI 清单")
     _add_doi_list(document, items)
@@ -954,6 +1057,16 @@ def write_word(path: Path, payload: dict[str, Any], items: list[dict[str, Any]])
             for run in paragraph.runs:
                 _set_run_font(run, size=10.5, color="1F2937")
 
+    if historical_years or historical_items:
+        historical_section = document.add_section(WD_SECTION.NEW_PAGE)
+        _configure_section(historical_section, landscape=True)
+        _set_running_header_footer(historical_section, report_date)
+        _add_section_heading(document, f"四、近 {historical_years or '?'} 年相关文献")
+        if historical_items:
+            _add_historical_summary_table(document, historical_items)
+        else:
+            document.add_paragraph("No historical candidate literature was found.")
+
     path.parent.mkdir(parents=True, exist_ok=True)
     document.save(path)
     _clean_word_font_theme(path)
@@ -969,8 +1082,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    setup_utf8_console()
     args = parse_args()
-    config = load_config(Path(args.config))
+    config_path = resolve_config_path(args.config)
+    change_to_config_dir(config_path)
+    config = load_config(config_path)
     paths = config.get("paths", {})
     input_path = Path(args.input or Path(paths.get("data_dir", "data")) / paths.get("latest_results_file", "latest_results.json"))
     payload = load_results(input_path)
@@ -978,10 +1094,13 @@ def main() -> None:
     report_date = args.date or payload.get("report_date") or date.today().isoformat()
     payload["report_date"] = report_date
     items = [normalize_item(item) for item in payload.get("items", [])]
+    historical_items = [normalize_item(item) for item in payload.get("historical_items", [])]
     translation_cache_path = Path(paths.get("data_dir", "data")) / "translation_cache.json"
     translation_config = None if args.no_translate else load_tencent_translation_config(cache_path=translation_cache_path)
-    items = maybe_translate_items(items, translation_config)
+    maybe_translate_items(items + historical_items, translation_config)
     items = sort_items(items)
+    historical_items = sort_historical_items(historical_items)
+    payload["historical_items"] = historical_items
     save_translated_results(input_path, config, payload, items)
 
     reports_dir = ensure_reports_dir(config)

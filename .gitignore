@@ -19,6 +19,7 @@ __pycache__/
 .coverage
 htmlcov/
 build/
+build_*/
 dist/
 *.egg-info/
 pip-wheel-metadata/

@@ -20,11 +20,16 @@ Representative mechanisms include:
 
 ## Files
 
-- `config.yaml`: Search window, enabled sources, publisher search profiles, source limits, broad topic keywords, scoring weights, and output paths.
+- `config.yaml`: Search windows, enabled sources, publisher search profiles, source limits, broad topic keywords, scoring weights, and output paths.
+- `config_editor.py`: Tkinter desktop editor for search terms, weights, recent-day window, and publication year range.
+- `literature_watcher.py`: Unified executable-friendly launcher for daily search, export-only runs, and the settings editor.
+- `app_paths.py`: Shared path helper so scripts and the packaged executable find `config.yaml`, `data/`, and `reports/` from the application folder.
 - `search_literature.py`: Queries the configured literature databases and publisher metadata indexes; scores candidates; deduplicates within the current run by DOI or title; marks `previously_seen`; saves JSON results.
 - `export_report.py`: Converts JSON results into the Word report and optionally fills Chinese translations during export.
 - `tencent_translation.py`: Reads optional Tencent Cloud translation settings from `.env`, translates titles and abstracts into Simplified Chinese, and caches translations.
 - `requirements.txt`: Python packages required by the project.
+- `requirements-build.txt`: Optional PyInstaller build dependency.
+- `run_config_editor.bat`: Windows one-click script for opening the search settings editor.
 - `run_daily.bat`: Windows one-click script that runs search first, then exports reports.
 - `run_daily_auto.bat`: Non-interactive Windows script for scheduled runs; it writes progress to `logs/daily_literature.log`.
 - `data/`: Stores `seen_items.json`, dated JSON result files, `latest_results.json`, and `translation_cache.json`.
@@ -51,7 +56,43 @@ This runs:
 1. `python search_literature.py --config config.yaml`
 2. `python export_report.py --config config.yaml --input data\latest_results.json`
 
-The default search window is the most recent 7 days.
+The same workflow can also be started through the unified launcher:
+
+```powershell
+python literature_watcher.py
+```
+
+Useful launcher options:
+
+```powershell
+python literature_watcher.py --export-only --no-translate
+python literature_watcher.py --edit-config
+python literature_watcher.py --lookback-days 1 --no-pause
+```
+
+The default daily search window is the most recent 7 days. After that daily search, the run also performs a configurable extended search for related literature from the most recent 15 years and stores those results separately as `historical_items`.
+
+## Search Settings Editor
+
+For non-technical users, double-click:
+
+```powershell
+.\run_config_editor.bat
+```
+
+The editor opens a local desktop window. Use it to:
+
+- add a search term with a positive weight
+- select an existing term, edit the text or weight, then click `更新选中`
+- click `全选` to select every term
+- select one or more existing terms and click `删除选中`
+- set `最近检索天数`
+- enable `启用发表年份范围`, then enter `开始年` and `结束年`
+- click `保存到 config.yaml`
+
+When search terms are saved, the editor updates both `keywords` and every `source_query_terms` list in `config.yaml`, so the displayed terms affect both database search and relevance scoring.
+
+When `publication_year_range.enabled` is true, `search_literature.py` searches from `start_year-01-01` through `end_year-12-31`. In this mode the separate `historical_search` pass is skipped to avoid retrieving the same range twice. Passing `--lookback-days` on the command line overrides the year range for that run.
 
 ## Outputs
 
@@ -63,12 +104,22 @@ Each daily run updates a single cumulative report instead of creating a new Word
 - `reports/literature_report.docx`
 - updated `data/seen_items.json`
 
-The Word report is sorted by first-seen date in descending order. Items in the same date bucket are sorted by relevance score and publication date in descending order. It has four main sections:
+When `historical_search.enabled` is true, the dated and latest JSON files also include:
+
+- `historical_lookback_years`
+- `historical_cutoff_date`
+- `historical_sources`
+- `historical_items`
+
+When `publication_year_range.enabled` is true, the dated and latest JSON files also include `publication_year_range`, and the Word report overview shows the selected year range.
+
+The Word report is sorted by first-seen date in descending order. Items in the same date bucket are sorted by relevance score and publication date in descending order. It has these main sections:
 
 - 检索概览: generation time, search window, candidate count, and source fetch counts
 - 累计 DOI 清单: first-seen date, publication date, and DOI
 - 候选文献总表: first-seen date, publication date, title, source, DOI, link, matched keywords, relevance score, and whether the paper appeared before
 - 详细文献信息: English and Chinese metadata, abstracts, and simple keyword-based relevance reasons
+- 近15年相关文献: extended-search summary table sorted by relevance score and publication date
 
 ## Optional Commands
 
@@ -103,6 +154,22 @@ Skip translation during export:
 ```powershell
 python export_report.py --no-translate
 ```
+
+## Build Executable
+
+Install the optional build dependency:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+```
+
+Build the main executable:
+
+```powershell
+.\.venv\Scripts\python.exe -m PyInstaller --onefile --name LiteratureWatcher literature_watcher.py
+```
+
+Copy `config.yaml` next to `dist\LiteratureWatcher.exe` before running it. Double-clicking the executable opens the search settings editor; command-line options such as `--search-only`, `--export-only`, or `--lookback-days` run the search/export workflow. The executable reads and writes `data\` and `reports\` beside that config file.
 
 ## Optional Tencent Cloud Translation
 

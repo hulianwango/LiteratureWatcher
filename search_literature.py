@@ -6,6 +6,7 @@ import os
 import re
 import time
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,8 @@ from urllib.parse import quote
 import feedparser
 import requests
 import yaml
+
+from app_paths import change_to_config_dir, resolve_config_path, setup_utf8_console
 
 
 OUTPUT_FIELDS = [
@@ -44,6 +47,16 @@ DEFAULT_ENABLED_SOURCES = [
     "doaj",
     "biorxiv",
     "medrxiv",
+]
+
+DEFAULT_HISTORICAL_SOURCES = [
+    "crossref",
+    "openalex",
+    "semantic_scholar",
+    "pubmed",
+    "europe_pmc",
+    "arxiv",
+    "doaj",
 ]
 
 DEFAULT_PUBLISHER_SEARCHES = [
@@ -78,6 +91,12 @@ DEFAULT_PUBLISHER_SEARCHES = [
     {"id": "oup", "label": "Oxford University Press", "crossref_member": 286},
     {"id": "cup", "label": "Cambridge University Press", "crossref_member": 56},
 ]
+
+DEFAULT_LOOKBACK_DAYS = 3
+DEFAULT_HISTORICAL_LOOKBACK_YEARS = 15
+TRUE_TEXT_VALUES = {"1", "true", "yes", "y", "on", "是"}
+
+HTTP_SESSION = requests.Session()
 
 
 def load_config(path: Path) -> dict[str, Any]:
@@ -164,23 +183,132 @@ def first_text(values: Any) -> str:
     return clean_text(values)
 
 
+def config_mapping(config: dict[str, Any], key: str) -> dict[str, Any]:
+    value = config.get(key, {})
+    return value if isinstance(value, dict) else {}
+
+
+def positive_int(value: Any, default: int) -> int:
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def clean_unique_strings(values: Any, *, lowercase: bool = False) -> list[str]:
+    if not isinstance(values, list):
+        return []
+
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value).strip()
+        if lowercase:
+            text = text.lower()
+        key = text.casefold()
+        if not text or key in seen:
+            continue
+        cleaned.append(text)
+        seen.add(key)
+    return cleaned
+
+
 def max_results_for_source(config: dict[str, Any], source: str, default: int = 30) -> int:
-    configured = config.get("max_results_per_source", {})
+    configured = config_mapping(config, "max_results_per_source")
     if source.startswith("publisher_"):
-        return int(configured.get(source, configured.get("publishers", default)))
-    return int(configured.get(source, default))
+        return positive_int(configured.get(source, configured.get("publishers", default)), default)
+    return positive_int(configured.get(source, default), default)
 
 
 def enabled_sources(config: dict[str, Any]) -> list[str]:
-    configured = config.get("enabled_sources")
-    if not configured:
-        return DEFAULT_ENABLED_SOURCES
+    return clean_unique_strings(config.get("enabled_sources"), lowercase=True) or DEFAULT_ENABLED_SOURCES.copy()
 
-    return [
-        str(source).strip().lower()
-        for source in configured
-        if str(source).strip()
-    ]
+
+def historical_search_options(config: dict[str, Any]) -> dict[str, Any]:
+    options = config.get("historical_search", {})
+    return options if isinstance(options, dict) else {}
+
+
+def config_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().lower() in TRUE_TEXT_VALUES
+
+
+def publication_year_range_options(config: dict[str, Any]) -> dict[str, Any]:
+    options = config.get("publication_year_range", {})
+    return options if isinstance(options, dict) else {}
+
+
+def publication_year_range_enabled(config: dict[str, Any]) -> bool:
+    return config_bool(publication_year_range_options(config).get("enabled"), False)
+
+
+def publication_year_range_years(config: dict[str, Any], current_year: int | None = None) -> tuple[int, int]:
+    options = publication_year_range_options(config)
+    current_year = current_year or date.today().year
+
+    try:
+        start_year = int(options.get("start_year"))
+        end_year = int(options.get("end_year"))
+    except (TypeError, ValueError) as error:
+        raise ValueError("publication_year_range.start_year and end_year must be four-digit years.") from error
+
+    if start_year > end_year:
+        raise ValueError("publication_year_range.start_year cannot be later than end_year.")
+    if end_year > current_year:
+        raise ValueError(f"publication_year_range.end_year cannot exceed the current year {current_year}.")
+    return start_year, end_year
+
+
+def publication_year_search_dates(config: dict[str, Any]) -> tuple[date, date, int, int]:
+    start_year, end_year = publication_year_range_years(config)
+    return date(start_year, 1, 1), date(end_year, 12, 31), start_year, end_year
+
+
+def historical_search_enabled(config: dict[str, Any]) -> bool:
+    options = historical_search_options(config)
+    return config_bool(options.get("enabled"), False)
+
+
+def historical_lookback_years(config: dict[str, Any]) -> int:
+    options = historical_search_options(config)
+    return positive_int(options.get("lookback_years", DEFAULT_HISTORICAL_LOOKBACK_YEARS), DEFAULT_HISTORICAL_LOOKBACK_YEARS)
+
+
+def historical_enabled_sources(config: dict[str, Any]) -> list[str]:
+    options = historical_search_options(config)
+    return clean_unique_strings(options.get("sources"), lowercase=True) or DEFAULT_HISTORICAL_SOURCES.copy()
+
+
+def historical_search_config(config: dict[str, Any]) -> dict[str, Any]:
+    options = historical_search_options(config)
+    scoped = dict(config)
+
+    for key in ("max_query_terms", "min_relevance_score"):
+        if key in options:
+            scoped[key] = options[key]
+
+    for key in ("max_results_per_source", "max_query_terms_per_source", "recent_feed_pages"):
+        override = options.get(key)
+        if not isinstance(override, dict):
+            continue
+        merged = dict(config_mapping(scoped, key))
+        merged.update(override)
+        scoped[key] = merged
+
+    return scoped
+
+
+def subtract_years(value: date, years: int) -> date:
+    try:
+        return value.replace(year=value.year - years)
+    except ValueError:
+        return value.replace(year=value.year - years, day=28)
 
 
 def publisher_profiles(config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -315,25 +443,35 @@ def item_relevance_score(item: dict[str, Any]) -> float:
 def build_keyword_map(config: dict[str, Any]) -> list[tuple[str, float]]:
     keywords = []
     for item in config.get("keywords", []):
-        term = str(item.get("term", "")).strip()
+        if isinstance(item, dict):
+            term = str(item.get("term", "")).strip()
+            raw_weight = item.get("weight", 1)
+        else:
+            term = str(item).strip()
+            raw_weight = 1
         if not term:
             continue
-        keywords.append((term, float(item.get("weight", 1))))
+        try:
+            weight = float(raw_weight)
+        except (TypeError, ValueError):
+            weight = 1.0
+        keywords.append((term, weight))
     return keywords
 
 
 def source_terms(config: dict[str, Any], source: str) -> list[str]:
-    configured = config.get("source_query_terms", {}).get(source)
+    source_query_terms = config_mapping(config, "source_query_terms")
+    configured = source_query_terms.get(source)
     if not configured:
-        configured = config.get("source_query_terms", {}).get("default")
+        configured = source_query_terms.get("default")
 
     if configured:
-        terms = [str(term).strip() for term in configured if str(term).strip()]
+        terms = clean_unique_strings(configured)
     else:
         terms = [term for term, _weight in build_keyword_map(config)]
 
     max_terms = config.get("max_query_terms", 40)
-    source_max_terms = config.get("max_query_terms_per_source", {}).get(source)
+    source_max_terms = config_mapping(config, "max_query_terms_per_source").get(source)
     if source_max_terms is not None:
         max_terms = source_max_terms
 
@@ -426,7 +564,7 @@ def http_get(
 
     for attempt in range(retry_count + 1):
         try:
-            response = requests.get(url, params=params, headers=active_headers, timeout=request_timeout)
+            response = HTTP_SESSION.get(url, params=params, headers=active_headers, timeout=request_timeout)
             retry_after = response.headers.get("Retry-After")
             retryable_status = response.status_code == 429 or response.status_code >= 500
             if retryable_status and attempt < retry_count:
@@ -779,7 +917,7 @@ def fetch_medrxiv(config: dict[str, Any], cutoff: date, end_date: date) -> list[
     return fetch_biorxiv_like(config, cutoff, end_date, "medrxiv")
 
 
-def fetch_arxiv(config: dict[str, Any], cutoff: date) -> list[dict[str, Any]]:
+def fetch_arxiv(config: dict[str, Any], cutoff: date, end_date: date) -> list[dict[str, Any]]:
     max_results = max_results_for_source(config, "arxiv")
     terms = source_terms(config, "arxiv")
     query = " OR ".join(f'all:"{term}"' for term in terms)
@@ -807,7 +945,7 @@ def fetch_arxiv(config: dict[str, Any], cutoff: date) -> list[dict[str, Any]]:
         published = parse_iso_date(entry.get("published"))
         updated = parse_iso_date(entry.get("updated"))
         record_date = published or updated
-        if record_date and record_date < cutoff:
+        if record_date and not (cutoff <= record_date <= end_date):
             continue
 
         authors = [author.get("name", "") for author in entry.get("authors", []) if author.get("name")]
@@ -1157,12 +1295,48 @@ def update_seen_with_results(seen: dict[str, set[str]], results: list[dict[str, 
             seen["title"].add(title)
 
 
-def fetch_all(config: dict[str, Any], cutoff: date, end_date: date) -> tuple[list[dict[str, Any]], dict[str, int]]:
+def result_identity_key(item: dict[str, Any]) -> str:
+    doi = normalize_doi(item.get("doi"))
+    if doi:
+        return f"doi:{doi}"
+
+    title = normalize_title(item.get("title_en") or item.get("title"))
+    return f"title:{title}" if title else ""
+
+
+def exclude_matching_results(items: list[dict[str, Any]], excluded: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    excluded_keys = {key for item in excluded if (key := result_identity_key(item))}
+    if not excluded_keys:
+        return items
+
+    filtered_items: list[dict[str, Any]] = []
+    for item in items:
+        key = result_identity_key(item)
+        if key and key in excluded_keys:
+            continue
+        filtered_items.append(item)
+    return filtered_items
+
+
+def sort_historical_results(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        items,
+        key=lambda value: (item_relevance_score(value), item_publication_date(value)),
+        reverse=True,
+    )
+
+
+def fetch_all(
+    config: dict[str, Any],
+    cutoff: date,
+    end_date: date,
+    configured_sources: list[str] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
     source_counts: dict[str, int] = {}
     all_items: list[dict[str, Any]] = []
 
-    source_fetchers = {
-        "arxiv": lambda: fetch_arxiv(config, cutoff),
+    source_fetchers: dict[str, Callable[[], list[dict[str, Any]]]] = {
+        "arxiv": lambda: fetch_arxiv(config, cutoff, end_date),
         "crossref": lambda: fetch_crossref(config, cutoff, end_date),
         "openalex": lambda: fetch_openalex(config, cutoff, end_date),
         "semantic_scholar": lambda: fetch_semantic_scholar(config, cutoff, end_date),
@@ -1173,9 +1347,9 @@ def fetch_all(config: dict[str, Any], cutoff: date, end_date: date) -> tuple[lis
         "medrxiv": lambda: fetch_medrxiv(config, cutoff, end_date),
     }
 
-    configured_sources = enabled_sources(config)
     expanded_fetchers: list[tuple[str, Any]] = []
-    for source in configured_sources:
+    active_sources = configured_sources if configured_sources is not None else enabled_sources(config)
+    for source in active_sources:
         if source == "publishers":
             for profile in publisher_profiles(config):
                 profile_id = clean_text(profile.get("id")).lower()
@@ -1215,34 +1389,87 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    setup_utf8_console()
     args = parse_args()
-    config = load_config(Path(args.config))
+    config_path = resolve_config_path(args.config)
+    change_to_config_dir(config_path)
+    config = load_config(config_path)
     data_dir, seen_file, latest_file = ensure_data_files(config)
 
-    end_date = date.fromisoformat(args.date) if args.date else today_local()
-    lookback_days = args.lookback_days or int(config.get("lookback_days", 3))
-    cutoff = end_date - timedelta(days=lookback_days)
+    report_date = date.fromisoformat(args.date) if args.date else today_local()
+    use_year_range = args.lookback_days is None and publication_year_range_enabled(config)
+    if use_year_range:
+        cutoff, search_end_date, start_year, end_year = publication_year_search_dates(config)
+        lookback_days: int | None = None
+    else:
+        search_end_date = report_date
+        lookback_days = positive_int(
+            args.lookback_days if args.lookback_days is not None else config.get("lookback_days", DEFAULT_LOOKBACK_DAYS),
+            DEFAULT_LOOKBACK_DAYS,
+        )
+        cutoff = search_end_date - timedelta(days=lookback_days)
 
     seen = load_seen(seen_file)
-    raw_items, source_counts = fetch_all(config, cutoff, end_date)
+    raw_items, source_counts = fetch_all(config, cutoff, search_end_date)
     results = dedupe_and_filter(raw_items, seen, config)
     update_seen_with_results(seen, results)
     save_seen(seen_file, seen)
 
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "report_date": end_date.isoformat(),
-        "lookback_days": lookback_days,
+        "report_date": report_date.isoformat(),
         "cutoff_date": cutoff.isoformat(),
+        "search_end_date": search_end_date.isoformat(),
         "sources": source_counts,
         "items": results,
     }
 
-    dated_file = data_dir / f"{end_date.isoformat()}_results.json"
+    if lookback_days is not None:
+        payload["lookback_days"] = lookback_days
+
+    if use_year_range:
+        payload["publication_year_range"] = {
+            "enabled": True,
+            "start_year": start_year,
+            "end_year": end_year,
+        }
+
+    run_historical_search = historical_search_enabled(config) and not use_year_range
+    if run_historical_search:
+        history_config = historical_search_config(config)
+        history_years = historical_lookback_years(config)
+        history_cutoff = subtract_years(report_date, history_years)
+        history_sources = historical_enabled_sources(config)
+        historical_raw_items, historical_source_counts = fetch_all(
+            history_config,
+            history_cutoff,
+            report_date,
+            configured_sources=history_sources,
+        )
+        historical_results = dedupe_and_filter(historical_raw_items, seen, history_config)
+        historical_results = exclude_matching_results(historical_results, results)
+        for item in historical_results:
+            item["search_scope"] = f"last_{history_years}_years"
+            item["retrieved_date"] = report_date.isoformat()
+        historical_results = sort_historical_results(historical_results)
+        payload.update(
+            {
+                "historical_lookback_years": history_years,
+                "historical_cutoff_date": history_cutoff.isoformat(),
+                "historical_sources": historical_source_counts,
+                "historical_items": historical_results,
+            }
+        )
+
+    dated_file = data_dir / f"{report_date.isoformat()}_results.json"
     save_json(dated_file, payload)
     save_json(latest_file, payload)
 
     print(f"Saved {len(results)} candidate items to {dated_file}")
+    if use_year_range:
+        print(f"Publication year range: {start_year}-{end_year}")
+    if run_historical_search:
+        print(f"Saved {len(payload.get('historical_items', []))} historical candidate items from the last {payload.get('historical_lookback_years')} years")
     print(f"Updated latest results at {latest_file}")
 
 
